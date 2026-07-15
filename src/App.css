@@ -1,0 +1,309 @@
+/* ── Shell ─────────────────────────────────────────────────────────────── */
+
+#app-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100svh;
+}
+
+/* ── Header ────────────────────────────────────────────────────────────── */
+
+.app-header {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.header-inner {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 0 24px;
+  display: flex;
+  align-items: center;
+  gap: 32px;
+  height: 52px;
+}
+
+.logo-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.logo-mark {
+  width: 28px;
+  height: 28px;
+  background: var(--accent);
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.logo-mark svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: #fff;
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.logo-text {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+  color: var(--text-h);
+}
+
+.logo-sub {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-muted);
+  letter-spacing: 0;
+}
+
+/* ── Tab-style buttons (used by the review toolbar) ────────────────────── */
+
+.tab-btn {
+  background: transparent;
+  color: var(--text-muted);
+  padding: 5px 14px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  font-weight: 500;
+  transition: background 0.12s, color 0.12s;
+}
+
+.tab-btn:hover { background: var(--bg); color: var(--text); }
+
+.tab-btn-active {
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* ── Main ──────────────────────────────────────────────────────────────── */
+
+.app-main {
+  flex: 1;
+  max-width: 1100px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 28px 24px;
+}
+
+/* ── Footer ────────────────────────────────────────────────────────────── */
+
+.app-footer {
+  text-align: center;
+  padding: 14px;
+  font-size: 12px;
+  color: var(--text-muted);
+  border-top: 1px solid var(--border);
+  letter-spacing: 0.1px;
+}
+
+/* ── Error box ─────────────────────────────────────────────────────────── */
+
+.error-box {
+  background: var(--red-bg);
+  color: var(--red);
+  border: 1px solid var(--red-border);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  font-size: 13px;
+}
+
+/* ── Spinner ───────────────────────────────────────────────────────────── */
+
+.spinner {
+  width: 28px;
+  height: 28px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Expert Review ─────────────────────────────────────────────────────── */
+
+.review-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.review-titlebar {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.review-titlebar h2 { font-size: 18px; }
+
+.review-meta {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.review-meta code {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.review-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px 24px;
+  padding: 12px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.review-toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.review-toolbar-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.review-coverage {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Stage: reject | canvas | submit */
+.review-stage {
+  display: flex;
+  align-items: stretch;
+  gap: 16px;
+  justify-content: center;
+}
+
+.review-side-btn {
+  flex: 0 0 96px;
+  border-radius: var(--radius);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.25;
+  transition: filter 0.12s;
+}
+
+.review-side-btn:hover:not(:disabled) { filter: brightness(1.08); }
+.review-side-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.review-reject { background: var(--red); }
+.review-submit { background: var(--accent); }
+
+.review-canvas-wrap {
+  position: relative;
+  flex: 0 1 512px;
+  aspect-ratio: 1 / 1;
+  background: var(--bg);
+  border: 1px solid var(--border-mid);
+  border-radius: var(--radius);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.review-canvas {
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+  touch-action: none;
+}
+
+.review-tool-add    { cursor: crosshair; }
+.review-tool-remove { cursor: cell; }
+
+.review-canvas-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/* Bottom tool row */
+.review-tools {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+.review-tool-btn {
+  padding: 12px 10px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  font-weight: 600;
+  border: 2px solid transparent;
+  background: var(--surface);
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.review-nochange {
+  color: var(--red);
+  border-color: var(--red-border);
+  background: var(--red-bg);
+}
+.review-nochange:hover:not(:disabled) { background: #fde8e8; }
+
+.review-remove {
+  color: var(--red);
+  border-color: var(--border-mid);
+}
+.review-add {
+  color: var(--accent);
+  border-color: var(--border-mid);
+}
+
+.review-tool-btn.review-tool-active.review-remove {
+  border-color: var(--red-border);
+  background: var(--red-bg);
+}
+.review-tool-btn.review-tool-active.review-add {
+  border-color: var(--ok-border);
+  background: var(--ok-bg);
+}
+.review-tool-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.review-footer-row {
+  display: flex;
+  justify-content: center;
+}
+
+/* ── Responsive ────────────────────────────────────────────────────────── */
+
+@media (max-width: 640px) {
+  .header-inner  { gap: 12px; }
+  .logo-sub      { display: none; }
+  .app-main      { padding: 18px 14px; }
+  .review-side-btn { flex-basis: 64px; font-size: 13px; }
+  .review-tools    { grid-template-columns: 1fr; }
+}
