@@ -14,3 +14,12 @@ export const maskTifUrl = (tileId: string) => `${HF_RESULTS_BASE}/masks/${tileId
 
 // Submit endpoint (tileloading backend). Reviews are persisted server-side.
 export const REVIEW_API_URL = `${TILE_API_URL}/reviews`
+
+// Minimal auth: reviewers register / log in with a username + password and
+// receive a session token. The token is attached to each review submission so
+// the backend can attribute it to the reviewer (and reject spoofed names).
+export const AUTH_API_URL = `${TILE_API_URL}/auth/login`
+export const REGISTER_API_URL = `${TILE_API_URL}/auth/register`
+
+// Leaderboard: aggregated review counts per reviewer, sorted server-side.
+export const RANKINGS_API_URL = `${TILE_API_URL}/rankings`

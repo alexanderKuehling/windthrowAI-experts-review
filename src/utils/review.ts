@@ -135,6 +135,15 @@ export async function encodeMaskPng(mask: Uint8Array, width: number, height: num
   )
 }
 
+// Thrown when the backend rejects the session token (e.g. expired). The UI
+// uses this to send the reviewer back to the login screen.
+export class SessionExpiredError extends Error {
+  constructor() {
+    super("Sitzung abgelaufen — bitte erneut anmelden.")
+    this.name = "SessionExpiredError"
+  }
+}
+
 export type Verdict = "confirmed" | "edited" | "no_windthrow"
 
 export interface ReviewSubmission {
@@ -144,6 +153,7 @@ export interface ReviewSubmission {
   width: number
   height: number
   reviewer?: string
+  token?: string // session token from login; attributes the review server-side
 }
 
 export async function submitReview(sub: ReviewSubmission): Promise<void> {
@@ -157,7 +167,9 @@ export async function submitReview(sub: ReviewSubmission): Promise<void> {
   const png = await encodeMaskPng(sub.mask, sub.width, sub.height)
   form.append("mask", new File([png], `${sub.tileId}_review.png`, { type: "image/png" }))
 
-  const res = await fetch(REVIEW_API_URL, { method: "POST", body: form })
+  const headers = sub.token ? { Authorization: `Bearer ${sub.token}` } : undefined
+  const res = await fetch(REVIEW_API_URL, { method: "POST", headers, body: form })
+  if (res.status === 401) throw new SessionExpiredError()
   if (!res.ok) {
     const detail = await res.text().catch(() => "")
     throw new Error(`Submit failed (${res.status}). ${detail}`.trim())

@@ -7,6 +7,7 @@ import {
   renderChannels,
   submitReview,
 } from "../utils/review"
+import { SessionExpiredError } from "../utils/review"
 import type { ChannelPreset, ReviewPatch, Verdict } from "../utils/review"
 
 type Tool = "add" | "remove"
@@ -14,7 +15,13 @@ type Status = "loading" | "ready" | "submitting"
 
 const OVERLAY_ALPHA = 0.45
 
-export function ExpertReviewTab() {
+interface ExpertReviewTabProps {
+  reviewer: string
+  token: string
+  onSessionExpired: () => void
+}
+
+export function ExpertReviewTab({ reviewer, token, onSessionExpired }: ExpertReviewTabProps) {
   const [tiles, setTiles] = useState<string[] | null>(null)
   const [patch, setPatch] = useState<ReviewPatch | null>(null)
   const [status, setStatus] = useState<Status>("loading")
@@ -162,10 +169,22 @@ export function ExpertReviewTab() {
     setStatus("submitting")
     setError(null)
     try {
-      await submitReview({ tileId: patch.tileId, verdict, mask, width: patch.width, height: patch.height })
+      await submitReview({
+        tileId: patch.tileId,
+        verdict,
+        mask,
+        width: patch.width,
+        height: patch.height,
+        reviewer,
+        token,
+      })
       setReviewedCount(c => c + 1)
       await loadRandom(tiles)
     } catch (e) {
+      if (e instanceof SessionExpiredError) {
+        onSessionExpired()
+        return
+      }
       setError(e instanceof Error ? e.message : String(e))
       setStatus("ready")
     }
