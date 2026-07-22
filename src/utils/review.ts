@@ -144,6 +144,17 @@ export class SessionExpiredError extends Error {
   }
 }
 
+// Count how many pixels differ between the originally proposed mask and the
+// mask the reviewer submitted. This is the reviewer's "effort" signal that the
+// ranking aggregates (a plain confirmation changes 0 pixels; a full rejection
+// changes every previously-on pixel).
+export function countChangedPixels(original: Uint8Array, edited: Uint8Array): number {
+  const n = Math.min(original.length, edited.length)
+  let changed = 0
+  for (let i = 0; i < n; i++) if (original[i] !== edited[i]) changed++
+  return changed
+}
+
 export type Verdict = "confirmed" | "edited" | "no_windthrow"
 
 export interface ReviewSubmission {
@@ -152,6 +163,7 @@ export interface ReviewSubmission {
   mask: Uint8Array
   width: number
   height: number
+  changedPixels?: number // pixels changed vs. the proposed mask (see countChangedPixels)
   reviewer?: string
   token?: string // session token from login; attributes the review server-side
 }
@@ -162,6 +174,7 @@ export async function submitReview(sub: ReviewSubmission): Promise<void> {
   form.append("verdict", sub.verdict)
   form.append("width", String(sub.width))
   form.append("height", String(sub.height))
+  form.append("changed_pixels", String(sub.changedPixels ?? 0))
   if (sub.reviewer) form.append("reviewer", sub.reviewer)
   // For a plain rejection we still send the (untouched) mask so the record is complete.
   const png = await encodeMaskPng(sub.mask, sub.width, sub.height)

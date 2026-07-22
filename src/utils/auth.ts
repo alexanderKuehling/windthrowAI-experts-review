@@ -5,9 +5,18 @@ export const PASSWORD_MIN = 8
 
 // A signed-in reviewer. `token` is the session credential the backend hands out
 // on login; it is replayed on every review submission (see submitReview).
+// A guest has no token: they can review anonymously but are not attributed and
+// never appear in the ranking.
 export interface AuthUser {
   name: string
   token: string
+  guest?: boolean
+}
+
+export const GUEST_NAME = "Gast"
+
+export function guestUser(): AuthUser {
+  return { name: GUEST_NAME, token: "", guest: true }
 }
 
 const STORAGE_KEY = "windthrow-review-auth"

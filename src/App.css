@@ -203,6 +203,59 @@
 .login-link:hover:not(:disabled) { filter: brightness(1.1); }
 .login-link:disabled { opacity: 0.5; cursor: not-allowed; }
 
+.login-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 6px 0 2px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.login-divider::before,
+.login-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border-mid);
+}
+
+.login-guest {
+  padding: 9px;
+  border: 1px solid var(--border-mid);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-h);
+  font-size: 14px;
+  font-weight: 600;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.login-guest:hover:not(:disabled) {
+  background: var(--surface-2, rgba(148, 163, 184, 0.12));
+  border-color: var(--accent);
+}
+
+.login-guest:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.login-guest-hint {
+  margin-top: -2px;
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.header-guest-badge {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
 /* ── Rankings ──────────────────────────────────────────────────────────── */
 
 .rankings {
@@ -295,12 +348,26 @@
   color: var(--accent);
 }
 
+.rankings-stats {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+  flex-shrink: 0;
+}
+
 .rankings-count {
   font-size: 14px;
   font-weight: 700;
   color: var(--text-h);
   font-variant-numeric: tabular-nums;
-  flex-shrink: 0;
+}
+
+.rankings-pixels {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .rankings-count-label {

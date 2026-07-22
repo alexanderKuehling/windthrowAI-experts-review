@@ -4,7 +4,12 @@ import type { AuthUser } from "../utils/auth"
 
 type Mode = "login" | "register"
 
-export function Login({ onLogin }: { onLogin: (user: AuthUser) => void }) {
+interface LoginProps {
+  onLogin: (user: AuthUser) => void
+  onGuest: () => void
+}
+
+export function Login({ onLogin, onGuest }: LoginProps) {
   const [mode, setMode] = useState<Mode>("login")
   const [name, setName] = useState("")
   const [password, setPassword] = useState("")
@@ -96,6 +101,20 @@ export function Login({ onLogin }: { onLogin: (user: AuthUser) => void }) {
               </button>
             </>
           )}
+        </p>
+
+        <div className="login-divider"><span>oder</span></div>
+
+        <button
+          type="button"
+          className="login-guest"
+          onClick={onGuest}
+          disabled={busy}
+        >
+          Ohne Anmeldung fortfahren
+        </button>
+        <p className="login-guest-hint">
+          Reviewen ohne Account — zählt nicht fürs Ranking.
         </p>
       </form>
     </div>

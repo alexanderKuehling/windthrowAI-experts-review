@@ -2,7 +2,7 @@ import { useState } from "react"
 import { ExpertReviewTab } from "./components/ExpertReviewTab"
 import { Login } from "./components/Login"
 import { Rankings } from "./components/Rankings"
-import { loadStoredUser, logout } from "./utils/auth"
+import { guestUser, loadStoredUser, logout } from "./utils/auth"
 import type { AuthUser } from "./utils/auth"
 import "./App.css"
 
@@ -12,9 +12,16 @@ export default function App() {
   const [user, setUser] = useState<AuthUser | null>(loadStoredUser)
   const [view, setView] = useState<View>("review")
 
+  const isGuest = !!user?.guest
+
   function handleLogout() {
     logout()
     setUser(null)
+    setView("review")
+  }
+
+  function handleGuest() {
+    setUser(guestUser())
     setView("review")
   }
 
@@ -43,17 +50,22 @@ export default function App() {
                 >
                   Review
                 </button>
-                <button
-                  className={`tab-btn ${view === "rankings" ? "tab-btn-active" : ""}`}
-                  onClick={() => setView("rankings")}
-                >
-                  Ranking
-                </button>
+                {!isGuest && (
+                  <button
+                    className={`tab-btn ${view === "rankings" ? "tab-btn-active" : ""}`}
+                    onClick={() => setView("rankings")}
+                  >
+                    Ranking
+                  </button>
+                )}
               </nav>
 
               <div className="header-user">
+                {isGuest && <span className="header-guest-badge">Gastmodus</span>}
                 <span className="header-username" title={user.name}>{user.name}</span>
-                <button className="tab-btn" onClick={handleLogout}>Abmelden</button>
+                <button className="tab-btn" onClick={handleLogout}>
+                  {isGuest ? "Beenden" : "Abmelden"}
+                </button>
               </div>
             </>
           )}
@@ -62,11 +74,11 @@ export default function App() {
 
       <main className="app-main">
         {!user ? (
-          <Login onLogin={setUser} />
+          <Login onLogin={setUser} onGuest={handleGuest} />
         ) : view === "review" ? (
           <ExpertReviewTab
-            reviewer={user.name}
-            token={user.token}
+            reviewer={isGuest ? undefined : user.name}
+            token={isGuest ? undefined : user.token}
             onSessionExpired={handleLogout}
           />
         ) : (

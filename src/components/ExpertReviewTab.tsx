@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import {
   CHANNEL_PRESETS,
+  countChangedPixels,
   fetchTileList,
   loadPatch,
   pickRandomTile,
@@ -16,8 +17,8 @@ type Status = "loading" | "ready" | "submitting"
 const OVERLAY_ALPHA = 0.45
 
 interface ExpertReviewTabProps {
-  reviewer: string
-  token: string
+  reviewer?: string // omitted for anonymous guest reviews
+  token?: string    // omitted for anonymous guest reviews
   onSessionExpired: () => void
 }
 
@@ -31,7 +32,9 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired }: ExpertRev
   const [brush, setBrush] = useState(4)
   const [dirty, setDirty] = useState(false)
   const [coverage, setCoverage] = useState(0)
+  const [changedPixels, setChangedPixels] = useState(0)
   const [reviewedCount, setReviewedCount] = useState(0)
+  const [changedTotal, setChangedTotal] = useState(0)
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const bgRef = useRef<Uint8ClampedArray | null>(null) // background RGBA, w*h*4
@@ -63,10 +66,16 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired }: ExpertRev
     setCoverage((on / mask.length) * 100)
   }, [])
 
+  // Pixels changed vs. the proposed mask of the tile currently under review.
+  function changedVsProposed(mask: Uint8Array): number {
+    return patch ? countChangedPixels(patch.mask, mask) : 0
+  }
+
   async function loadRandom(list: string[]) {
     setStatus("loading")
     setError(null)
     setDirty(false)
+    setChangedPixels(0)
     const current = patch?.tileId
     const next = pickRandomTile(list, current)
     try {
@@ -152,13 +161,17 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired }: ExpertRev
   function endPaint() {
     if (!paintingRef.current) return
     paintingRef.current = false
-    if (maskRef.current) computeCoverage(maskRef.current)
+    if (maskRef.current) {
+      computeCoverage(maskRef.current)
+      setChangedPixels(changedVsProposed(maskRef.current))
+    }
   }
 
   function handleReset() {
     if (!patch) return
     maskRef.current = Uint8Array.from(patch.mask)
     setDirty(false)
+    setChangedPixels(0)
     computeCoverage(patch.mask)
     redraw()
   }
@@ -168,6 +181,7 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired }: ExpertRev
     if (!patch || !tiles) return
     setStatus("submitting")
     setError(null)
+    const changed = changedVsProposed(mask)
     try {
       await submitReview({
         tileId: patch.tileId,
@@ -175,10 +189,12 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired }: ExpertRev
         mask,
         width: patch.width,
         height: patch.height,
+        changedPixels: changed,
         reviewer,
         token,
       })
       setReviewedCount(c => c + 1)
+      setChangedTotal(t => t + changed)
       await loadRandom(tiles)
     } catch (e) {
       if (e instanceof SessionExpiredError) {
@@ -213,7 +229,9 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired }: ExpertRev
       <div className="review-titlebar">
         <h2>Bildabschnitt bearbeiten</h2>
         <span className="review-meta">
-          {reviewedCount > 0 && <>{reviewedCount} reviewed &middot; </>}
+          {reviewedCount > 0 && (
+            <>{reviewedCount} reviewed &middot; {changedTotal.toLocaleString("de-DE")} px geändert &middot; </>
+          )}
           {patch ? <code>{patch.tileId}</code> : "—"}
         </span>
       </div>
@@ -244,6 +262,7 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired }: ExpertRev
             onChange={e => setBrush(Number(e.target.value))}
           />
           <span className="review-coverage">Coverage {coverage.toFixed(1)}%</span>
+          <span className="review-coverage">Geändert {changedPixels.toLocaleString("de-DE")} px</span>
           <button className="tab-btn" onClick={handleReset} disabled={!dirty || busy}>
             Reset mask
           </button>

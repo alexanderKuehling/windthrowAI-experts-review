@@ -60,9 +60,17 @@ export function Rankings({ currentUser }: { currentUser: string }) {
                   {e.reviewer}
                   {isMe && <span className="rankings-you"> (du)</span>}
                 </span>
-                <span className="rankings-count">
-                  {e.count}
-                  <span className="rankings-count-label"> Reviews</span>
+                <span className="rankings-stats">
+                  <span className="rankings-count">
+                    {e.count}
+                    <span className="rankings-count-label"> Reviews</span>
+                  </span>
+                  {e.pixels != null && (
+                    <span className="rankings-pixels">
+                      {e.pixels.toLocaleString("de-DE")}
+                      <span className="rankings-count-label"> px geändert</span>
+                    </span>
+                  )}
                 </span>
               </li>
             )
