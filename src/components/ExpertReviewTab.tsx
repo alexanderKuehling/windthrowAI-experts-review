@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   CHANNEL_PRESETS,
   countChangedPixels,
+  fetchCoverageIndex,
   fetchTileList,
   loadPatch,
   maskCoverage,
@@ -9,16 +10,14 @@ import {
   submitReview,
 } from "../utils/review"
 import { SessionExpiredError } from "../utils/review"
-import type { ChannelPreset, ReviewPatch, Verdict } from "../utils/review"
+import type { ChannelPreset, CoverageIndex, ReviewPatch, Verdict } from "../utils/review"
 
 type Tool = "add" | "remove"
 type Status = "loading" | "ready" | "submitting"
 
 const DEFAULT_OVERLAY_ALPHA = 0.45
-const DEFAULT_MIN_COVERAGE = 3 // %, 0 = show every positive tile (no filter)
-// How many random tiles to load at most while searching for one that meets the
-// minimum-coverage filter, before falling back to the best one seen.
-const MAX_COVERAGE_ATTEMPTS = 40
+const DEFAULT_MIN_COVERAGE = 1 // %, 0 = show every positive tile (no filter)
+const MAX_MIN_COVERAGE = 20    // slider ceiling (only a handful of tiles exceed this)
 
 interface ExpertReviewTabProps {
   reviewer?: string // omitted for anonymous guest reviews
@@ -36,6 +35,7 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired }: ExpertRev
   const [brush, setBrush] = useState(4)
   const [overlayAlpha, setOverlayAlpha] = useState(DEFAULT_OVERLAY_ALPHA)
   const [minCoverage, setMinCoverage] = useState(DEFAULT_MIN_COVERAGE)
+  const [coverageIndex, setCoverageIndex] = useState<CoverageIndex>({})
   const [notice, setNotice] = useState<string | null>(null)
   const [dirty, setDirty] = useState(false)
   const [coverage, setCoverage] = useState(0)
@@ -51,17 +51,21 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired }: ExpertRev
   const brushRef = useRef(brush)
   const overlayAlphaRef = useRef(overlayAlpha)
   const minCoverageRef = useRef(minCoverage)
+  const coverageIndexRef = useRef(coverageIndex)
   toolRef.current = tool
   brushRef.current = brush
   overlayAlphaRef.current = overlayAlpha
   minCoverageRef.current = minCoverage
+  coverageIndexRef.current = coverageIndex
 
-  // ── Load the tile index once ──────────────────────────────────────────────
+  // ── Load the tile index + coverage index once ─────────────────────────────
   useEffect(() => {
-    fetchTileList()
-      .then(list => {
+    Promise.all([fetchTileList(), fetchCoverageIndex()])
+      .then(([list, index]) => {
         if (list.length === 0) throw new Error("No positive tiles available to review.")
         setTiles(list)
+        setCoverageIndex(index)
+        coverageIndexRef.current = index // ref lags a render; loadRandom needs it now
         void loadRandom(list)
       })
       .catch(e => {
@@ -80,46 +84,40 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired }: ExpertRev
     return patch ? countChangedPixels(patch.mask, mask) : 0
   }
 
-  // Load a random tile whose proposed windthrow covers at least `minCoverage`%
-  // of the image. Because coverage is only known after decoding a tile's mask,
-  // we keep pulling random (not-yet-tried) tiles until one clears the threshold,
-  // and fall back to the best one seen if none does within MAX_COVERAGE_ATTEMPTS.
+  // Tiles whose precomputed windthrow coverage meets the current filter. When
+  // the coverage index is unavailable (empty), every tile is eligible so the
+  // review flow still works — just without pre-filtering.
+  function eligibleTiles(list: string[], min: number, index: CoverageIndex): string[] {
+    if (min <= 0 || Object.keys(index).length === 0) return list
+    return list.filter(t => (index[t] ?? -1) >= min)
+  }
+
+  // Load a random eligible tile. Coverage is now known up front from the index,
+  // so exactly one tile is fetched — no scanning through the dataset.
   async function loadRandom(list: string[]) {
+    const min = minCoverageRef.current
+    const pool = eligibleTiles(list, min, coverageIndexRef.current)
+    if (pool.length === 0) {
+      setNotice(`No tile has ≥ ${min}% windthrow coverage — lower the filter.`)
+      return // keep the current tile on screen
+    }
+
     setStatus("loading")
     setError(null)
     setNotice(null)
     setDirty(false)
     setChangedPixels(0)
 
-    const min = minCoverageRef.current
-    const tried = new Set<string>()
-    if (list.length > 1 && patch?.tileId) tried.add(patch.tileId) // avoid immediate repeat
-    let best: { patch: ReviewPatch; coverage: number } | null = null
+    // Avoid immediately repeating the tile under review when alternatives exist.
+    const current = patch?.tileId
+    const candidates = current && pool.length > 1 ? pool.filter(t => t !== current) : pool
+    const next = candidates[Math.floor(Math.random() * candidates.length)]
 
     try {
-      for (let attempt = 0; attempt < MAX_COVERAGE_ATTEMPTS; attempt++) {
-        const pool = list.filter(t => !tried.has(t))
-        if (pool.length === 0) break // exhausted the whole dataset
-        const next = pool[Math.floor(Math.random() * pool.length)]
-        tried.add(next)
-
-        const p = await loadPatch(next)
-        const cov = maskCoverage(p.mask)
-        if (!best || cov > best.coverage) best = { patch: p, coverage: cov }
-        if (cov >= min) break // found a tile that meets the filter
-      }
-
-      if (!best) throw new Error("No tile available.")
-
-      maskRef.current = Uint8Array.from(best.patch.mask)
-      setPatch(best.patch)
-      setCoverage(best.coverage)
-      if (min > 0 && best.coverage < min) {
-        setNotice(
-          `No tile with ≥ ${min}% windthrow coverage found ` +
-            `(${tried.size} checked). Showing the best available: ${best.coverage.toFixed(1)}%.`,
-        )
-      }
+      const p = await loadPatch(next)
+      maskRef.current = Uint8Array.from(p.mask)
+      setPatch(p)
+      setCoverage(maskCoverage(p.mask))
       setStatus("ready")
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -143,15 +141,23 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired }: ExpertRev
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [overlayAlpha])
 
-  // Raising the filter above the current tile's coverage pulls a new qualifying
-  // tile. Debounced so dragging the slider doesn't fire a load on every step.
+  // When the filter is raised past the current tile's coverage, pull a new
+  // qualifying tile. Debounced so dragging the slider fires just one load.
   useEffect(() => {
     if (!tiles || status !== "ready") return
     if (minCoverage <= 0 || coverage >= minCoverage) return
-    const id = setTimeout(() => void loadRandom(tiles), 300)
+    const id = setTimeout(() => void loadRandom(tiles), 250)
     return () => clearTimeout(id)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [minCoverage])
+
+  // How many tiles the current filter admits (from the coverage index), shown
+  // next to the slider. null while the index is unavailable.
+  const matchCount = useMemo(() => {
+    const values = Object.values(coverageIndex)
+    if (values.length === 0) return null
+    return minCoverage <= 0 ? values.length : values.filter(c => c >= minCoverage).length
+  }, [coverageIndex, minCoverage])
 
   function redraw() {
     const canvas = canvasRef.current
@@ -336,13 +342,16 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired }: ExpertRev
           <input
             type="range"
             min={0}
-            max={25}
-            step={0.5}
+            max={MAX_MIN_COVERAGE}
+            step={0.1}
             value={minCoverage}
             title="Only show tiles whose proposed windthrow covers at least this share of the image"
             onChange={e => setMinCoverage(Number(e.target.value))}
             disabled={busy}
           />
+          {matchCount !== null && (
+            <span className="review-coverage">{matchCount} tiles</span>
+          )}
         </div>
       </div>
 

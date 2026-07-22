@@ -12,6 +12,12 @@ export const INPUTS_INDEX_URL = `${HF_RESULTS_BASE}/inputs_index.csv`
 export const inputTifUrl = (tileId: string) => `${HF_RESULTS_BASE}/inputs/${tileId}.tif`
 export const maskTifUrl = (tileId: string) => `${HF_RESULTS_BASE}/masks/${tileId}.tif`
 
+// Precomputed windthrow coverage per tile (share of mask pixels that are
+// windthrow, in %). Built offline by scripts/build-coverage-index.mjs and
+// shipped as a static asset so the review UI can filter tiles by coverage
+// *before* fetching any imagery. Regenerate with `npm run build:coverage`.
+export const COVERAGE_INDEX_URL = `${import.meta.env.BASE_URL}coverage_index.json`
+
 // Submit endpoint (tileloading backend). Reviews are persisted server-side.
 export const REVIEW_API_URL = `${TILE_API_URL}/reviews`
 

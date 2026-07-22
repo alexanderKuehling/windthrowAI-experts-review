@@ -1,5 +1,14 @@
 import { fromBlob } from "geotiff"
-import { INPUTS_INDEX_URL, REVIEW_API_URL, inputTifUrl, maskTifUrl } from "../constants"
+import {
+  COVERAGE_INDEX_URL,
+  INPUTS_INDEX_URL,
+  REVIEW_API_URL,
+  inputTifUrl,
+  maskTifUrl,
+} from "../constants"
+
+// tile_id → windthrow coverage in % (see COVERAGE_INDEX_URL).
+export type CoverageIndex = Record<string, number>
 
 // A positive tile awaiting expert review.
 export interface ReviewPatch {
@@ -56,6 +65,19 @@ export async function fetchTileList(): Promise<string[]> {
   const idCol = header.indexOf("tile_id")
   if (idCol === -1) throw new Error("inputs_index.csv is missing a tile_id column.")
   return lines.slice(1).map(l => l.split(",")[idCol]).filter(Boolean)
+}
+
+// Load the precomputed coverage index. Returns {} (no filtering) if the asset
+// is missing or malformed, so the review flow keeps working without it.
+export async function fetchCoverageIndex(): Promise<CoverageIndex> {
+  try {
+    const res = await fetch(COVERAGE_INDEX_URL)
+    if (!res.ok) return {}
+    const data: unknown = await res.json()
+    return data && typeof data === "object" ? (data as CoverageIndex) : {}
+  } catch {
+    return {}
+  }
 }
 
 export function pickRandomTile(tiles: string[], exclude?: string): string {
