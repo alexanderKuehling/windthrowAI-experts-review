@@ -14,7 +14,7 @@ import type { ChannelPreset, ReviewPatch, Verdict } from "../utils/review"
 type Tool = "add" | "remove"
 type Status = "loading" | "ready" | "submitting"
 
-const OVERLAY_ALPHA = 0.45
+const DEFAULT_OVERLAY_ALPHA = 0.45
 
 interface ExpertReviewTabProps {
   reviewer?: string // omitted for anonymous guest reviews
@@ -30,6 +30,7 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired }: ExpertRev
   const [preset, setPreset] = useState<ChannelPreset>(CHANNEL_PRESETS[0])
   const [tool, setTool] = useState<Tool>("add")
   const [brush, setBrush] = useState(4)
+  const [overlayAlpha, setOverlayAlpha] = useState(DEFAULT_OVERLAY_ALPHA)
   const [dirty, setDirty] = useState(false)
   const [coverage, setCoverage] = useState(0)
   const [changedPixels, setChangedPixels] = useState(0)
@@ -42,8 +43,10 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired }: ExpertRev
   const paintingRef = useRef(false)
   const toolRef = useRef<Tool>(tool)
   const brushRef = useRef(brush)
+  const overlayAlphaRef = useRef(overlayAlpha)
   toolRef.current = tool
   brushRef.current = brush
+  overlayAlphaRef.current = overlayAlpha
 
   // ── Load the tile index once ──────────────────────────────────────────────
   useEffect(() => {
@@ -100,6 +103,12 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired }: ExpertRev
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [patch, preset])
 
+  // Redraw when the overlay opacity changes.
+  useEffect(() => {
+    redraw()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [overlayAlpha])
+
   function redraw() {
     const canvas = canvasRef.current
     const bg = bgRef.current
@@ -112,9 +121,10 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired }: ExpertRev
     for (let i = 0; i < w * h; i++) {
       const o = i * 4
       if (mask[i]) {
-        d[o] = bg[o] * (1 - OVERLAY_ALPHA) + 255 * OVERLAY_ALPHA
-        d[o + 1] = bg[o + 1] * (1 - OVERLAY_ALPHA)
-        d[o + 2] = bg[o + 2] * (1 - OVERLAY_ALPHA)
+        const a = overlayAlphaRef.current
+        d[o] = bg[o] * (1 - a) + 255 * a
+        d[o + 1] = bg[o + 1] * (1 - a)
+        d[o + 2] = bg[o + 2] * (1 - a)
       } else {
         d[o] = bg[o]
         d[o + 1] = bg[o + 1]
@@ -261,6 +271,14 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired }: ExpertRev
             value={brush}
             onChange={e => setBrush(Number(e.target.value))}
           />
+          <span className="review-toolbar-label">Deckkraft {Math.round(overlayAlpha * 100)}%</span>
+          <input
+            type="range"
+            min={0}
+            max={100}
+            value={Math.round(overlayAlpha * 100)}
+            onChange={e => setOverlayAlpha(Number(e.target.value) / 100)}
+          />
           <span className="review-coverage">Coverage {coverage.toFixed(1)}%</span>
           <span className="review-coverage">Geändert {changedPixels.toLocaleString("de-DE")} px</span>
           <button className="tab-btn" onClick={handleReset} disabled={!dirty || busy}>
@@ -276,14 +294,14 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired }: ExpertRev
           onClick={handleNoWindthrow}
           disabled={busy}
         >
-          No<br />windthrow
+          No<br />windthrowopa
         </button>
 
         <div className="review-canvas-wrap">
           {status === "loading" && (
             <div className="review-canvas-loading">
               <div className="spinner" />
-              <p>Loading patch…</p>
+              <p>Loading patch…(Can take a moment for the first image)</p>
             </div>
           )}
           <canvas
