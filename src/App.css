@@ -577,6 +577,15 @@
   font-variant-numeric: tabular-nums;
 }
 
+.review-notice {
+  background: var(--warn-bg);
+  color: var(--warn);
+  border: 1px solid var(--warn-border);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  font-size: 13px;
+}
+
 /* Stage: reject | canvas | submit */
 .review-stage {
   display: flex;

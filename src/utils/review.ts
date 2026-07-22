@@ -63,6 +63,16 @@ export function pickRandomTile(tiles: string[], exclude?: string): string {
   return pool[Math.floor(Math.random() * pool.length)]
 }
 
+// Fraction of the tile covered by the (windthrow) mask, expressed as a
+// percentage in [0, 100]. Used both to show the current coverage and to filter
+// out tiles whose proposed windthrow covers too little of the image.
+export function maskCoverage(mask: Uint8Array): number {
+  if (mask.length === 0) return 0
+  let on = 0
+  for (let i = 0; i < mask.length; i++) on += mask[i]
+  return (on / mask.length) * 100
+}
+
 // Load a single tile's input imagery + proposed mask.
 export async function loadPatch(tileId: string): Promise<ReviewPatch> {
   const [inputBlob, maskBlob] = await Promise.all([
