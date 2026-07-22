@@ -465,7 +465,7 @@ function Privacy() {
         <li>Right to complain to the regulator (Article 77 GDPR)</li>
       </ul>
 
-      <p className="legal-status">Status: 17.07.26 · Draft v0.1</p>
+      <p className="legal-status">Status: 22.07.26 · Version 1.0</p>
     </>
   )
 }
