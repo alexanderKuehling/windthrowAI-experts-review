@@ -54,17 +54,39 @@ async function readAllBands(blob: Blob): Promise<{ width: number; height: number
   return { width: image.getWidth(), height: image.getHeight(), bands }
 }
 
-// Fetch the list of positive tile_ids from inputs_index.csv.
-export async function fetchTileList(): Promise<string[]> {
+export interface TileIndex {
+  tiles: string[]
+  coverage: CoverageIndex // populated only if inputs_index.csv has a `coverage` column
+}
+
+// Fetch the positive tiles from inputs_index.csv. When the CSV carries a
+// `coverage` column (written by the data pipeline, export_for_frontend.py), the
+// per-tile windthrow coverage is returned alongside the ids; otherwise coverage
+// is empty and the caller falls back to the shipped coverage_index.json.
+export async function fetchTileIndex(): Promise<TileIndex> {
   const res = await fetch(INPUTS_INDEX_URL)
   if (!res.ok) throw new Error(`Could not load tile index (${res.status}).`)
   const text = await res.text()
   const lines = text.trim().split(/\r?\n/)
-  if (lines.length < 2) return []
+  if (lines.length < 2) return { tiles: [], coverage: {} }
   const header = lines[0].split(",")
   const idCol = header.indexOf("tile_id")
   if (idCol === -1) throw new Error("inputs_index.csv is missing a tile_id column.")
-  return lines.slice(1).map(l => l.split(",")[idCol]).filter(Boolean)
+  const covCol = header.indexOf("coverage")
+
+  const tiles: string[] = []
+  const coverage: CoverageIndex = {}
+  for (const line of lines.slice(1)) {
+    const cols = line.split(",")
+    const id = cols[idCol]
+    if (!id) continue
+    tiles.push(id)
+    if (covCol !== -1) {
+      const c = Number(cols[covCol])
+      if (Number.isFinite(c)) coverage[id] = c
+    }
+  }
+  return { tiles, coverage }
 }
 
 // Load the precomputed coverage index. Returns {} (no filtering) if the asset

@@ -3,7 +3,7 @@ import {
   CHANNEL_PRESETS,
   countChangedPixels,
   fetchCoverageIndex,
-  fetchTileList,
+  fetchTileIndex,
   loadPatch,
   maskCoverage,
   renderChannels,
@@ -58,11 +58,16 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired }: ExpertRev
   minCoverageRef.current = minCoverage
   coverageIndexRef.current = coverageIndex
 
-  // ── Load the tile index + coverage index once ─────────────────────────────
+  // ── Load the tile index (+ coverage) once ─────────────────────────────────
   useEffect(() => {
-    Promise.all([fetchTileList(), fetchCoverageIndex()])
-      .then(([list, index]) => {
+    fetchTileIndex()
+      .then(async ({ tiles: list, coverage }) => {
         if (list.length === 0) throw new Error("No positive tiles available to review.")
+        // Prefer coverage from inputs_index.csv (written by the data pipeline).
+        // Until the next scan re-exports it, fall back to the shipped static
+        // coverage_index.json so the filter still works today.
+        const index =
+          Object.keys(coverage).length > 0 ? coverage : await fetchCoverageIndex()
         setTiles(list)
         setCoverageIndex(index)
         coverageIndexRef.current = index // ref lags a render; loadRandom needs it now
@@ -287,10 +292,10 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired }: ExpertRev
   return (
     <div className="review-tab">
       <div className="review-titlebar">
-        <h2>Bildabschnitt bearbeiten</h2>
+        <h2>Edit patch</h2>
         <span className="review-meta">
           {reviewedCount > 0 && (
-            <>{reviewedCount} reviewed &middot; {changedTotal.toLocaleString("de-DE")} px geändert &middot; </>
+            <>{reviewedCount} reviewed &middot; {changedTotal.toLocaleString("en-US")} px changed &middot; </>
           )}
           {patch ? <code>{patch.tileId}</code> : "—"}
         </span>
@@ -321,7 +326,7 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired }: ExpertRev
             value={brush}
             onChange={e => setBrush(Number(e.target.value))}
           />
-          <span className="review-toolbar-label">Deckkraft {Math.round(overlayAlpha * 100)}%</span>
+          <span className="review-toolbar-label">Opacity {Math.round(overlayAlpha * 100)}%</span>
           <input
             type="range"
             min={0}
