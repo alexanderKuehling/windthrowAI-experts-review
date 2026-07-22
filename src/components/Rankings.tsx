@@ -28,9 +28,9 @@ export function Rankings({ currentUser }: { currentUser: string }) {
   return (
     <div className="rankings">
       <div className="rankings-titlebar">
-        <h2>Ranking</h2>
+        <h2>Rankings</h2>
         <button className="tab-btn" onClick={() => void load()} disabled={loading}>
-          {loading ? "Aktualisieren…" : "Aktualisieren"}
+          {loading ? "Refreshing…" : "Refresh"}
         </button>
       </div>
 
@@ -39,12 +39,12 @@ export function Rankings({ currentUser }: { currentUser: string }) {
       {loading && !entries && (
         <div className="rankings-loading">
           <div className="spinner" />
-          <p>Ranking wird geladen…</p>
+          <p>Loading rankings…</p>
         </div>
       )}
 
       {entries && entries.length === 0 && !error && (
-        <p className="rankings-empty">Noch keine Reviews vorhanden.</p>
+        <p className="rankings-empty">No reviews yet.</p>
       )}
 
       {entries && entries.length > 0 && (
@@ -58,7 +58,7 @@ export function Rankings({ currentUser }: { currentUser: string }) {
                 </span>
                 <span className="rankings-name">
                   {e.reviewer}
-                  {isMe && <span className="rankings-you"> (du)</span>}
+                  {isMe && <span className="rankings-you"> (you)</span>}
                 </span>
                 <span className="rankings-stats">
                   <span className="rankings-count">
@@ -67,8 +67,8 @@ export function Rankings({ currentUser }: { currentUser: string }) {
                   </span>
                   {e.pixels != null && (
                     <span className="rankings-pixels">
-                      {e.pixels.toLocaleString("de-DE")}
-                      <span className="rankings-count-label"> px geändert</span>
+                      {e.pixels.toLocaleString("en-US")}
+                      <span className="rankings-count-label"> px changed</span>
                     </span>
                   )}
                 </span>

@@ -24,10 +24,10 @@ function readPixels(e: Record<string, unknown>): number | undefined {
 // the backend doesn't. `pixels` is optional so older backends still parse.
 export async function fetchRankings(): Promise<RankingEntry[]> {
   const res = await fetch(RANKINGS_API_URL)
-  if (!res.ok) throw new Error(`Rankings konnten nicht geladen werden (${res.status}).`)
+  if (!res.ok) throw new Error(`Could not load rankings (${res.status}).`)
 
   const data = (await res.json()) as unknown
-  if (!Array.isArray(data)) throw new Error("Unerwartetes Rankings-Format vom Server.")
+  if (!Array.isArray(data)) throw new Error("Unexpected rankings format from server.")
 
   return data
     .map(e => e as Record<string, unknown>)

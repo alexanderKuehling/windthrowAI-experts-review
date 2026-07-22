@@ -13,7 +13,7 @@ export interface AuthUser {
   guest?: boolean
 }
 
-export const GUEST_NAME = "Gast"
+export const GUEST_NAME = "Guest"
 
 export function guestUser(): AuthUser {
   return { name: GUEST_NAME, token: "", guest: true }
@@ -59,18 +59,18 @@ async function authRequest(url: string, name: string, password: string): Promise
       body: JSON.stringify({ name: name.trim(), password }),
     })
   } catch {
-    throw new Error("Server nicht erreichbar. Bitte später erneut versuchen.")
+    throw new Error("Server unreachable. Please try again later.")
   }
 
-  if (res.status === 401) throw new Error("Name oder Passwort ist falsch.")
-  if (res.status === 409) throw new Error("Dieser Name ist bereits vergeben.")
+  if (res.status === 401) throw new Error("Name or password is incorrect.")
+  if (res.status === 409) throw new Error("This name is already taken.")
   if (!res.ok) {
     const detail = (await res.json().catch(() => ({}))) as { error?: string }
-    throw new Error(detail.error || `Fehlgeschlagen (${res.status}).`)
+    throw new Error(detail.error || `Failed (${res.status}).`)
   }
 
   const data = (await res.json().catch(() => ({}))) as Partial<AuthUser>
-  if (!data.token) throw new Error("Antwort ohne Token.")
+  if (!data.token) throw new Error("Response contained no token.")
 
   const user: AuthUser = { name: data.name?.trim() || name.trim(), token: data.token }
   storeUser(user)

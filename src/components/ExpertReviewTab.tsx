@@ -335,7 +335,7 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired }: ExpertRev
             onChange={e => setOverlayAlpha(Number(e.target.value) / 100)}
           />
           <span className="review-coverage">Coverage {coverage.toFixed(1)}%</span>
-          <span className="review-coverage">Geändert {changedPixels.toLocaleString("de-DE")} px</span>
+          <span className="review-coverage">Changed {changedPixels.toLocaleString("en-US")} px</span>
           <button className="tab-btn" onClick={handleReset} disabled={!dirty || busy}>
             Reset mask
           </button>
@@ -404,19 +404,19 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired }: ExpertRev
       {/* Bottom row: no-change | remove tool | add tool */}
       <div className="review-tools">
         <button className="review-tool-btn review-nochange" onClick={handleNoChange} disabled={busy}>
-          Keine Änderung erforderlich
+          No change needed
         </button>
         <button
           className={`review-tool-btn review-remove ${tool === "remove" ? "review-tool-active" : ""}`}
           onClick={() => setTool("remove")}
         >
-          Pixel entfernen
+          Remove pixels
         </button>
         <button
           className={`review-tool-btn review-add ${tool === "add" ? "review-tool-active" : ""}`}
           onClick={() => setTool("add")}
         >
-          Pixel hinzufügen
+          Add pixels
         </button>
       </div>
 

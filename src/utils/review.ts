@@ -193,7 +193,7 @@ export async function encodeMaskPng(mask: Uint8Array, width: number, height: num
 // uses this to send the reviewer back to the login screen.
 export class SessionExpiredError extends Error {
   constructor() {
-    super("Sitzung abgelaufen — bitte erneut anmelden.")
+    super("Session expired — please sign in again.")
     this.name = "SessionExpiredError"
   }
 }

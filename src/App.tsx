@@ -58,16 +58,16 @@ export default function App() {
                     className={`tab-btn ${view === "rankings" ? "tab-btn-active" : ""}`}
                     onClick={() => setView("rankings")}
                   >
-                    Ranking
+                    Rankings
                   </button>
                 )}
               </nav>
 
               <div className="header-user">
-                {isGuest && <span className="header-guest-badge">Gastmodus</span>}
+                {isGuest && <span className="header-guest-badge">Guest mode</span>}
                 <span className="header-username" title={user.name}>{user.name}</span>
                 <button className="tab-btn" onClick={handleLogout}>
-                  {isGuest ? "Beenden" : "Abmelden"}
+                  {isGuest ? "Exit" : "Sign out"}
                 </button>
               </div>
             </>

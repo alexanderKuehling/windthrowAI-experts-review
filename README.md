@@ -8,7 +8,7 @@ model's proposed mask overlaid, and can:
 - paint / erase the mask with an adjustable brush,
 - **Submit** the (optionally edited) mask,
 - mark **No windthrow** (false positive),
-- confirm with **Keine Änderung erforderlich** (mask is correct as-is),
+- confirm with **No change needed** (mask is correct as-is),
 - **Skip** to another random tile.
 
 Each submission is posted to the review backend, which persists the verdict and

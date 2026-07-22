@@ -27,7 +27,7 @@ export function Login({ onLogin, onGuest }: LoginProps) {
     e.preventDefault()
     if (!name.trim() || !password) return
     if (isRegister && password.length < PASSWORD_MIN) {
-      setError(`Das Passwort muss mindestens ${PASSWORD_MIN} Zeichen haben.`)
+      setError(`The password must be at least ${PASSWORD_MIN} characters long.`)
       return
     }
     setBusy(true)
@@ -43,11 +43,11 @@ export function Login({ onLogin, onGuest }: LoginProps) {
   return (
     <div className="login-wrap">
       <form className="login-card" onSubmit={handleSubmit}>
-        <h2>{isRegister ? "Registrieren" : "Anmelden"}</h2>
+        <h2>{isRegister ? "Register" : "Sign in"}</h2>
         <p className="login-hint">
           {isRegister
-            ? "Wähle einen Anzeigenamen und ein Passwort. Bitte ein Pseudonym verwenden — keinen Klarnamen und keine E-Mail."
-            : "Melde dich an, um Tiles zu reviewen und im Ranking zu erscheinen."}
+            ? "Choose a display name and a password. Please use a pseudonym — no real name and no email."
+            : "Sign in to review tiles and appear in the rankings."}
         </p>
 
         {error && <div className="error-box">{error}</div>}
@@ -65,7 +65,7 @@ export function Login({ onLogin, onGuest }: LoginProps) {
         </label>
 
         <label className="login-field">
-          <span>Passwort{isRegister && <span className="login-req"> (mind. {PASSWORD_MIN} Zeichen)</span>}</span>
+          <span>Password{isRegister && <span className="login-req"> (min. {PASSWORD_MIN} characters)</span>}</span>
           <input
             type="password"
             autoComplete={isRegister ? "new-password" : "current-password"}
@@ -83,27 +83,27 @@ export function Login({ onLogin, onGuest }: LoginProps) {
           disabled={busy || !name.trim() || !password}
         >
           {busy
-            ? isRegister ? "Registrieren…" : "Anmelden…"
-            : isRegister ? "Registrieren" : "Anmelden"}
+            ? isRegister ? "Registering…" : "Signing in…"
+            : isRegister ? "Register" : "Sign in"}
         </button>
 
         <p className="login-switch">
           {isRegister ? (
-            <>Schon registriert?{" "}
+            <>Already registered?{" "}
               <button type="button" className="login-link" onClick={() => switchMode("login")} disabled={busy}>
-                Anmelden
+                Sign in
               </button>
             </>
           ) : (
-            <>Noch kein Account?{" "}
+            <>No account yet?{" "}
               <button type="button" className="login-link" onClick={() => switchMode("register")} disabled={busy}>
-                Registrieren
+                Register
               </button>
             </>
           )}
         </p>
 
-        <div className="login-divider"><span>oder</span></div>
+        <div className="login-divider"><span>or</span></div>
 
         <button
           type="button"
@@ -111,10 +111,10 @@ export function Login({ onLogin, onGuest }: LoginProps) {
           onClick={onGuest}
           disabled={busy}
         >
-          Ohne Anmeldung fortfahren
+          Continue without signing in
         </button>
         <p className="login-guest-hint">
-          Reviewen ohne Account — zählt nicht fürs Ranking.
+          Review without an account — doesn't count towards the rankings.
         </p>
       </form>
     </div>
