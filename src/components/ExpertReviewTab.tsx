@@ -294,7 +294,7 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired }: ExpertRev
           onClick={handleNoWindthrow}
           disabled={busy}
         >
-          No<br />windthrowopa
+          No<br />windthrow
         </button>
 
         <div className="review-canvas-wrap">
