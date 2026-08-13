@@ -6,6 +6,7 @@ import {
   fetchTileIndex,
   loadPatch,
   maskCoverage,
+  prefetchPatch,
   renderChannels,
   submitReview,
 } from "../utils/review"
@@ -44,6 +45,7 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired }: ExpertRev
   const [changedTotal, setChangedTotal] = useState(0)
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const nextTileRef = useRef<string | null>(null) // tile prefetched for the next Submit/Skip
   const bgRef = useRef<Uint8ClampedArray | null>(null) // background RGBA, w*h*4
   const maskRef = useRef<Uint8Array | null>(null)       // editable mask
   const paintingRef = useRef(false)
@@ -97,6 +99,21 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired }: ExpertRev
     return list.filter(t => (index[t] ?? -1) >= min)
   }
 
+  // Pick a random tile from the pool, avoiding an immediate repeat of `current`.
+  function pickFrom(pool: string[], current?: string): string {
+    const candidates = current && pool.length > 1 ? pool.filter(t => t !== current) : pool
+    return candidates[Math.floor(Math.random() * candidates.length)]
+  }
+
+  // Choose the tile that follows `current` and start downloading it now, so the
+  // next Submit/Skip renders from memory instead of waiting on the network.
+  function queueNext(list: string[], current: string) {
+    const pool = eligibleTiles(list, minCoverageRef.current, coverageIndexRef.current)
+    const next = pool.length > 0 ? pickFrom(pool, current) : null
+    nextTileRef.current = next
+    if (next) prefetchPatch(next)
+  }
+
   // Load a random eligible tile. Coverage is now known up front from the index,
   // so exactly one tile is fetched — no scanning through the dataset.
   async function loadRandom(list: string[]) {
@@ -113,10 +130,13 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired }: ExpertRev
     setDirty(false)
     setChangedPixels(0)
 
-    // Avoid immediately repeating the tile under review when alternatives exist.
+    // Take the prefetched tile when it still passes the current filter (the
+    // coverage slider may have moved since it was queued), else pick a fresh one.
     const current = patch?.tileId
-    const candidates = current && pool.length > 1 ? pool.filter(t => t !== current) : pool
-    const next = candidates[Math.floor(Math.random() * candidates.length)]
+    const queued = nextTileRef.current
+    const next =
+      queued && queued !== current && pool.includes(queued) ? queued : pickFrom(pool, current)
+    nextTileRef.current = null
 
     try {
       const p = await loadPatch(next)
@@ -124,6 +144,7 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired }: ExpertRev
       setPatch(p)
       setCoverage(maskCoverage(p.mask))
       setStatus("ready")
+      queueNext(list, next)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
       setStatus("ready")

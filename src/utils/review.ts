@@ -42,15 +42,29 @@ async function fetchBlob(url: string): Promise<Blob> {
   return res.blob()
 }
 
-// Read every band of a (possibly multi-band) GeoTIFF as Float32Array[].
+// Read every band of a (possibly multi-band) GeoTIFF as Float32Array[]. Input
+// tiles are published as uint16 DN + GDAL scale/offset (export_for_frontend.py);
+// applying those recovers the physical reflectance. Files without scale/offset
+// (older float32 exports, masks) are passed through unchanged.
 async function readAllBands(blob: Blob): Promise<{ width: number; height: number; bands: Float32Array[] }> {
   const tiff = await fromBlob(blob)
   const image = await tiff.getImage()
   const rasters = await image.readRasters()
   const bandsRaw = rasters as ArrayLike<number>[]
-  const bands = bandsRaw.map(b =>
-    b instanceof Float32Array ? b : new Float32Array(b as ArrayLike<number>),
-  )
+  const bands: Float32Array[] = []
+  for (let i = 0; i < bandsRaw.length; i++) {
+    const b = bandsRaw[i]
+    const band = b instanceof Float32Array ? b : new Float32Array(b as ArrayLike<number>)
+    // Sequential on purpose: concurrent getGDALMetadata() calls race on the lazy
+    // tag load inside geotiff.js and resolve to null for all but the first.
+    const meta = (await image.getGDALMetadata(i)) as Record<string, string> | null
+    const scale = Number(meta?.SCALE ?? 1)
+    const offset = Number(meta?.OFFSET ?? 0)
+    if (Number.isFinite(scale) && Number.isFinite(offset) && (scale !== 1 || offset !== 0)) {
+      for (let j = 0; j < band.length; j++) band[j] = band[j] * scale + offset
+    }
+    bands.push(band)
+  }
   return { width: image.getWidth(), height: image.getHeight(), bands }
 }
 
@@ -117,8 +131,35 @@ export function maskCoverage(mask: Uint8Array): number {
   return (on / mask.length) * 100
 }
 
-// Load a single tile's input imagery + proposed mask.
-export async function loadPatch(tileId: string): Promise<ReviewPatch> {
+// Decoded patches, keyed by tile_id. Small on purpose: it exists so the tile
+// prefetched while the reviewer works on the current one is already in memory
+// when they hit Submit/Skip. Patches are treated as immutable by callers.
+const PATCH_CACHE_LIMIT = 8
+const patchCache = new Map<string, Promise<ReviewPatch>>()
+
+// Load a single tile's input imagery + proposed mask, from cache when warm.
+export function loadPatch(tileId: string): Promise<ReviewPatch> {
+  const hit = patchCache.get(tileId)
+  if (hit) return hit
+
+  const pending = fetchPatch(tileId).catch(e => {
+    patchCache.delete(tileId) // don't cache failures — a retry should hit the network
+    throw e
+  })
+  patchCache.set(tileId, pending)
+  while (patchCache.size > PATCH_CACHE_LIMIT) {
+    patchCache.delete(patchCache.keys().next().value!)
+  }
+  return pending
+}
+
+// Warm the cache for a tile the reviewer is likely to see next. Failures are
+// ignored here; they surface when (and if) the tile is actually loaded.
+export function prefetchPatch(tileId: string): void {
+  void loadPatch(tileId).catch(() => {})
+}
+
+async function fetchPatch(tileId: string): Promise<ReviewPatch> {
   const [inputBlob, maskBlob] = await Promise.all([
     fetchBlob(inputTifUrl(tileId)),
     fetchBlob(maskTifUrl(tileId)),
