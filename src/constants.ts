@@ -1,5 +1,11 @@
-// Backend that persists reviews (tileloading service).
-export const TILE_API_URL = "https://windthrowai-tileloading-80422754009.europe-west3.run.app"
+// Backend that persists reviews (tileloading service). In dev the app calls the
+// relative /api path, which the Vite dev server proxies to the backend
+// (vite.config.ts) — same origin, so no CORS setup is needed. Builds hit the
+// deployed service unless VITE_TILE_API_URL overrides it (that origin then has
+// to be in the backend's EXTRA_CORS_ORIGINS).
+export const TILE_API_PROD_URL = "https://windthrowai-tileloading-80422754009.europe-west3.run.app"
+export const TILE_API_URL: string =
+  import.meta.env.VITE_TILE_API_URL || (import.meta.env.DEV ? "/api" : TILE_API_PROD_URL)
 
 // Windthrow detection results dataset (HF dataset repo).
 const HF_RESULTS_REPO = "alexKlg/windthrowAI-dataset-segmentation_results"
@@ -29,3 +35,19 @@ export const REGISTER_API_URL = `${TILE_API_URL}/auth/register`
 
 // Leaderboard: aggregated review counts per reviewer, sorted server-side.
 export const RANKINGS_API_URL = `${TILE_API_URL}/rankings`
+
+// Custom channel presets, persisted server-side per reviewer account (so they
+// follow the reviewer across devices/browsers instead of living only in this
+// browser's localStorage). Requires a signed-in reviewer — anonymous guests
+// keep using the localStorage fallback (see utils/channels.ts).
+export const PRESETS_API_URL = `${TILE_API_URL}/presets`
+
+// The Amazon scan composites Landsat 8 Collection-2 L2 scenes from this window
+// (see amazon-scan src/config.py DATE_FROM / DATE_TO). Used as the acquisition
+// label whenever inputs_index.csv carries no per-tile date_first / date_last.
+export const IMAGERY = {
+  sensor: "Landsat 8",
+  windowFrom: "2024-06-01",
+  windowTo: "2024-09-30",
+  fallbackLabel: "Jun–Sep 2024",
+} as const

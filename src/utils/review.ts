@@ -22,20 +22,6 @@ export interface ReviewPatch {
 // Band layout of the model-input GeoTIFF (see amazon-scan config.BAND_NAMES).
 export const BAND_LABELS = ["R", "G", "B", "nIR", "swIR1", "swIR2", "NBR"] as const
 
-// Channel presets — each maps a display channel (red/green/blue) to a source band index.
-export interface ChannelPreset {
-  id: string
-  label: string
-  bands: [number, number, number] // source band indices for R, G, B display channels
-}
-
-export const CHANNEL_PRESETS: ChannelPreset[] = [
-  { id: "true",  label: "True Color",       bands: [0, 1, 2] },
-  { id: "veg",   label: "Vegetation (nIR)", bands: [3, 0, 1] },
-  { id: "swir",  label: "SWIR",             bands: [5, 3, 1] },
-  { id: "nbr",   label: "NBR (burn ratio)", bands: [6, 6, 6] },
-]
-
 async function fetchBlob(url: string): Promise<Blob> {
   const res = await fetch(url)
   if (!res.ok) throw new Error(`${res.status} ${res.statusText} — ${url}`)
@@ -68,39 +54,85 @@ async function readAllBands(blob: Blob): Promise<{ width: number; height: number
   return { width: image.getWidth(), height: image.getHeight(), bands }
 }
 
-export interface TileIndex {
-  tiles: string[]
-  coverage: CoverageIndex // populated only if inputs_index.csv has a `coverage` column
+// Per-tile metadata read from inputs_index.csv. Every field is optional: the
+// published CSV currently carries only tile_id + bbox, and a future re-export
+// will add the scan's metric columns. Absent columns must never break the app.
+export interface TileMeta {
+  coverage?: number   // % of the tile flagged as windthrow  (column `coverage`)
+  lonMin?: number     // column `lon_min`
+  latMin?: number     // column `lat_min`
+  lonMax?: number     // column `lon_max`
+  latMax?: number     // column `lat_max`
+  dateFirst?: string  // "YYYY-MM-DD", column `date_first`
+  dateLast?: string   // "YYYY-MM-DD", column `date_last`
 }
 
-// Fetch the positive tiles from inputs_index.csv. When the CSV carries a
-// `coverage` column (written by the data pipeline, export_for_frontend.py), the
-// per-tile windthrow coverage is returned alongside the ids; otherwise coverage
-// is empty and the caller falls back to the shipped coverage_index.json.
+export type TileMetaIndex = Record<string, TileMeta>
+
+export interface TileIndex {
+  tiles: string[]
+  meta: TileMetaIndex
+  coverage: CoverageIndex // derived; empty when the CSV has no `coverage` column
+}
+
+// undefined when the column is absent, the cell is missing/empty, or not finite.
+function num(cols: string[], idx: number): number | undefined {
+  if (idx === -1) return undefined
+  const raw = cols[idx]
+  if (raw === undefined || raw === "") return undefined
+  const v = Number(raw)
+  return Number.isFinite(v) ? v : undefined
+}
+
+// undefined when the column is absent or the cell is missing/empty.
+function str(cols: string[], idx: number): string | undefined {
+  if (idx === -1) return undefined
+  const raw = cols[idx]
+  return raw === undefined || raw === "" ? undefined : raw
+}
+
+// Fetch the positive tiles from inputs_index.csv. Every column is resolved by
+// header name and is optional beyond `tile_id` — the published CSV today only
+// carries tile_id + bbox, and a future re-export will add coverage/dates.
 export async function fetchTileIndex(): Promise<TileIndex> {
   const res = await fetch(INPUTS_INDEX_URL)
   if (!res.ok) throw new Error(`Could not load tile index (${res.status}).`)
   const text = await res.text()
   const lines = text.trim().split(/\r?\n/)
-  if (lines.length < 2) return { tiles: [], coverage: {} }
+  if (lines.length < 2) return { tiles: [], meta: {}, coverage: {} }
   const header = lines[0].split(",")
   const idCol = header.indexOf("tile_id")
   if (idCol === -1) throw new Error("inputs_index.csv is missing a tile_id column.")
   const covCol = header.indexOf("coverage")
+  const lonMinCol = header.indexOf("lon_min")
+  const latMinCol = header.indexOf("lat_min")
+  const lonMaxCol = header.indexOf("lon_max")
+  const latMaxCol = header.indexOf("lat_max")
+  const dateFirstCol = header.indexOf("date_first")
+  const dateLastCol = header.indexOf("date_last")
 
   const tiles: string[] = []
+  const meta: TileMetaIndex = {}
   const coverage: CoverageIndex = {}
   for (const line of lines.slice(1)) {
-    const cols = line.split(",")
+    const cols = line.split(",") // rows shorter than the header are fine: num/str return undefined
     const id = cols[idCol]
     if (!id) continue
     tiles.push(id)
-    if (covCol !== -1) {
-      const c = Number(cols[covCol])
-      if (Number.isFinite(c)) coverage[id] = c
+
+    const m: TileMeta = {
+      coverage: num(cols, covCol),
+      lonMin: num(cols, lonMinCol),
+      latMin: num(cols, latMinCol),
+      lonMax: num(cols, lonMaxCol),
+      latMax: num(cols, latMaxCol),
+      dateFirst: str(cols, dateFirstCol),
+      dateLast: str(cols, dateLastCol),
     }
+    meta[id] = m
+    if (m.coverage !== undefined) coverage[id] = m.coverage
   }
-  return { tiles, coverage }
+  return { tiles, meta, coverage }
 }
 
 // Load the precomputed coverage index. Returns {} (no filtering) if the asset
@@ -178,35 +210,6 @@ async function fetchPatch(tileId: string): Promise<ReviewPatch> {
     height: input.height,
     bands: input.bands,
     mask,
-  }
-}
-
-// Percentile-stretch three source bands into RGBA pixels on the given ImageData.
-export function renderChannels(
-  patch: ReviewPatch,
-  preset: ChannelPreset,
-  target: Uint8ClampedArray,
-): void {
-  const { width, height, bands } = patch
-  const n = width * height
-  const [ri, gi, bi] = preset.bands
-  const selected = [bands[ri], bands[gi], bands[bi]]
-
-  // Shared percentile stretch across the three shown bands (matches TifUploadTab preview).
-  const combined = new Float32Array(n * 3)
-  selected.forEach((band, i) => combined.set(band, i * n))
-  const sorted = Float32Array.from(combined).sort()
-  const p5 = sorted[Math.floor(sorted.length * 0.02)]
-  const p95 = sorted[Math.floor(sorted.length * 0.98)]
-  const range = p95 - p5 || 1
-
-  const stretch = (v: number) => Math.round(Math.max(0, Math.min(1, (v - p5) / range)) * 255)
-
-  for (let i = 0; i < n; i++) {
-    target[i * 4 + 0] = stretch(selected[0][i])
-    target[i * 4 + 1] = stretch(selected[1][i])
-    target[i * 4 + 2] = stretch(selected[2][i])
-    target[i * 4 + 3] = 255
   }
 }
 

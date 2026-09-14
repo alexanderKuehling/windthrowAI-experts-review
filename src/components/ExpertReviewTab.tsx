@@ -1,17 +1,24 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
-  CHANNEL_PRESETS,
+  BAND_LABELS,
   countChangedPixels,
   fetchCoverageIndex,
   fetchTileIndex,
   loadPatch,
   maskCoverage,
   prefetchPatch,
-  renderChannels,
   submitReview,
 } from "../utils/review"
 import { SessionExpiredError } from "../utils/review"
-import type { ChannelPreset, CoverageIndex, ReviewPatch, Verdict } from "../utils/review"
+import type { CoverageIndex, ReviewPatch, TileMetaIndex, Verdict } from "../utils/review"
+import { allPresets, BUILTIN_PRESETS, formatValue, probePanel, renderPreset } from "../utils/channels"
+import type { ChannelPreset, PixelProbe } from "../utils/channels"
+import { bboxCenter, formatAcquisition, formatLatLon, mapsUrl } from "../utils/geo"
+import { IMAGERY } from "../constants"
+import { useAppState } from "../state/appStateContext"
+import { Colorbar } from "./Colorbar"
+import { HelpModal } from "./HelpModal"
+import type { HelpSection } from "./HelpModal"
 
 type Tool = "add" | "remove"
 type Status = "loading" | "ready" | "submitting"
@@ -19,19 +26,24 @@ type Status = "loading" | "ready" | "submitting"
 const DEFAULT_OVERLAY_ALPHA = 0.45
 const DEFAULT_MIN_COVERAGE = 1 // %, 0 = show every positive tile (no filter)
 const MAX_MIN_COVERAGE = 20    // slider ceiling (only a handful of tiles exceed this)
+const HELP_SEEN_KEY = "windthrowai.helpSeen.v1"
 
 interface ExpertReviewTabProps {
   reviewer?: string // omitted for anonymous guest reviews
   token?: string    // omitted for anonymous guest reviews
   onSessionExpired: () => void
+  onOpenChannels: () => void
 }
 
-export function ExpertReviewTab({ reviewer, token, onSessionExpired }: ExpertReviewTabProps) {
+export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChannels }: ExpertReviewTabProps) {
+  const { setPatch: setSharedPatch, customPresets } = useAppState()
+
   const [tiles, setTiles] = useState<string[] | null>(null)
+  const [tileMeta, setTileMeta] = useState<TileMetaIndex>({})
   const [patch, setPatch] = useState<ReviewPatch | null>(null)
   const [status, setStatus] = useState<Status>("loading")
   const [error, setError] = useState<string | null>(null)
-  const [preset, setPreset] = useState<ChannelPreset>(CHANNEL_PRESETS[0])
+  const [preset, setPreset] = useState<ChannelPreset>(BUILTIN_PRESETS[0])
   const [tool, setTool] = useState<Tool>("add")
   const [brush, setBrush] = useState(4)
   const [overlayAlpha, setOverlayAlpha] = useState(DEFAULT_OVERLAY_ALPHA)
@@ -42,7 +54,7 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired }: ExpertRev
   const [coverage, setCoverage] = useState(0)
   const [changedPixels, setChangedPixels] = useState(0)
   const [reviewedCount, setReviewedCount] = useState(0)
-  const [changedTotal, setChangedTotal] = useState(0)
+  const [probe, setProbe] = useState<{ x: number; y: number; data: PixelProbe } | null>(null)
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const nextTileRef = useRef<string | null>(null) // tile prefetched for the next Submit/Skip
@@ -60,10 +72,39 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired }: ExpertRev
   minCoverageRef.current = minCoverage
   coverageIndexRef.current = coverageIndex
 
+  const allPresetsList = useMemo(() => allPresets(customPresets), [customPresets])
+
+  // If the active preset was a custom one that got deleted on the Channels
+  // page, fall back to the first built-in rather than leaving a dangling id.
+  // Computed during render (not an effect) so there's no extra render pass.
+  const activePreset = allPresetsList.some(p => p.id === preset.id) ? preset : BUILTIN_PRESETS[0]
+
+  // ── Help modal: auto-open once per browser, fail closed on storage errors ──
+  // Lazy initializer runs exactly once at mount, so no effect + extra render is needed.
+  const [helpSection, setHelpSection] = useState<HelpSection | null>(() => {
+    try {
+      return localStorage.getItem(HELP_SEEN_KEY) ? null : "overview"
+    } catch {
+      return null // storage blocked — never auto-open
+    }
+  })
+
+  function openHelp(section: HelpSection) {
+    setHelpSection(section)
+  }
+  function closeHelp() {
+    setHelpSection(null)
+    try {
+      localStorage.setItem(HELP_SEEN_KEY, "1")
+    } catch {
+      // degrade silently
+    }
+  }
+
   // ── Load the tile index (+ coverage) once ─────────────────────────────────
   useEffect(() => {
     fetchTileIndex()
-      .then(async ({ tiles: list, coverage }) => {
+      .then(async ({ tiles: list, meta, coverage }) => {
         if (list.length === 0) throw new Error("No positive tiles available to review.")
         // Prefer coverage from inputs_index.csv (written by the data pipeline).
         // Until the next scan re-exports it, fall back to the shipped static
@@ -71,6 +112,7 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired }: ExpertRev
         const index =
           Object.keys(coverage).length > 0 ? coverage : await fetchCoverageIndex()
         setTiles(list)
+        setTileMeta(meta)
         setCoverageIndex(index)
         coverageIndexRef.current = index // ref lags a render; loadRandom needs it now
         void loadRandom(list)
@@ -121,7 +163,8 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired }: ExpertRev
     const pool = eligibleTiles(list, min, coverageIndexRef.current)
     if (pool.length === 0) {
       setNotice(`No tile has ≥ ${min}% windthrow coverage — lower the filter.`)
-      return // keep the current tile on screen
+      setStatus("ready") // keep the current tile on screen, but don't leave the UI stuck
+      return
     }
 
     setStatus("loading")
@@ -142,6 +185,7 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired }: ExpertRev
       const p = await loadPatch(next)
       maskRef.current = Uint8Array.from(p.mask)
       setPatch(p)
+      setSharedPatch(p)
       setCoverage(maskCoverage(p.mask))
       setStatus("ready")
       queueNext(list, next)
@@ -151,15 +195,29 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired }: ExpertRev
     }
   }
 
-  // ── Recompute the background whenever the patch or channel preset changes ──
-  useEffect(() => {
-    if (!patch) return
+  // ── The background composite ──────────────────────────────────────────────
+  // Pure in (patch, preset), so it's derived rather than pushed into state by
+  // an effect. A custom preset can carry a formula that no longer compiles (a
+  // half-finished edit saved, a band renamed); that's reported next to the
+  // canvas and the previous frame stays up, instead of taking the page down.
+  const background = useMemo(() => {
+    if (!patch) return null
     const bg = new Uint8ClampedArray(patch.width * patch.height * 4)
-    renderChannels(patch, preset, bg)
-    bgRef.current = bg
+    try {
+      return { bg, stats: renderPreset(patch, activePreset, bg), error: null as string | null }
+    } catch (e) {
+      return { bg: null, stats: null, error: e instanceof Error ? e.message : String(e) }
+    }
+  }, [patch, activePreset])
+
+  const presetStats = background?.stats ?? null
+  const presetError = background?.error ?? null
+
+  useEffect(() => {
+    if (background?.bg) bgRef.current = background.bg
     redraw()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [patch, preset])
+  }, [background])
 
   // Redraw when the overlay opacity changes.
   useEffect(() => {
@@ -179,11 +237,14 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired }: ExpertRev
 
   // How many tiles the current filter admits (from the coverage index), shown
   // next to the slider. null while the index is unavailable.
+  const totalCount = useMemo(() => Object.values(coverageIndex).length, [coverageIndex])
   const matchCount = useMemo(() => {
     const values = Object.values(coverageIndex)
     if (values.length === 0) return null
     return minCoverage <= 0 ? values.length : values.filter(c => c >= minCoverage).length
   }, [coverageIndex, minCoverage])
+  const lowMatchNote =
+    matchCount !== null && minCoverage <= 1 && matchCount < totalCount * 0.5
 
   function redraw() {
     const canvas = canvasRef.current
@@ -201,13 +262,15 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired }: ExpertRev
         d[o] = bg[o] * (1 - a) + 255 * a
         d[o + 1] = bg[o + 1] * (1 - a)
         d[o + 2] = bg[o + 2] * (1 - a)
+        d[o + 3] = 255 // the mask stays visible even over a no-data pixel
       } else {
         d[o] = bg[o]
         d[o + 1] = bg[o + 1]
         d[o + 2] = bg[o + 2]
+        d[o + 3] = bg[o + 3] // 0 where the formula had no data — let the hatch show
       }
-      d[o + 3] = 255
     }
+    ctx.clearRect(0, 0, w, h)
     ctx.putImageData(img, 0, 0)
   }
 
@@ -243,6 +306,27 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired }: ExpertRev
   }
   function handlePointerMove(e: React.PointerEvent) {
     if (paintingRef.current) paintAt(e.clientX, e.clientY)
+    updateProbe(e.clientX, e.clientY)
+  }
+
+  // ── Pixel probe ───────────────────────────────────────────────────────────
+  // Reads out the actual numbers under the cursor. Especially worth having on
+  // an index view: it's how a reviewer checks that the colour they're about to
+  // act on corresponds to the value they think it does.
+  function updateProbe(clientX: number, clientY: number) {
+    const canvas = canvasRef.current
+    if (!canvas || !patch) return
+    const rect = canvas.getBoundingClientRect()
+    const x = Math.floor(((clientX - rect.left) / rect.width) * patch.width)
+    const y = Math.floor(((clientY - rect.top) / rect.height) * patch.height)
+    if (x < 0 || y < 0 || x >= patch.width || y >= patch.height) return
+    const panel = activePreset.panels[0]
+    if (!panel) return
+    try {
+      setProbe({ x, y, data: probePanel(patch, panel, y * patch.width + x) })
+    } catch {
+      setProbe(null) // broken formula — presetError already says so
+    }
   }
   function endPaint() {
     if (!paintingRef.current) return
@@ -280,7 +364,6 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired }: ExpertRev
         token,
       })
       setReviewedCount(c => c + 1)
-      setChangedTotal(t => t + changed)
       await loadRandom(tiles)
     } catch (e) {
       if (e instanceof SessionExpiredError) {
@@ -296,10 +379,6 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired }: ExpertRev
     if (!patch) return
     send("no_windthrow", new Uint8Array(patch.width * patch.height)) // empty mask = false positive
   }
-  function handleNoChange() {
-    if (!patch) return
-    send("confirmed", patch.mask)
-  }
   function handleSubmit() {
     if (!patch || !maskRef.current) return
     send(dirty ? "edited" : "confirmed", maskRef.current)
@@ -310,94 +389,117 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired }: ExpertRev
 
   const busy = status !== "ready"
 
+  const meta = patch ? tileMeta[patch.tileId] : undefined
+  const center = bboxCenter(meta)
+  const acq = formatAcquisition(meta)
+
   return (
     <div className="review-tab">
       <div className="review-titlebar">
-        <h2>Edit patch</h2>
-        <span className="review-meta">
-          {reviewedCount > 0 && (
-            <>{reviewedCount} reviewed &middot; {changedTotal.toLocaleString("en-US")} px changed &middot; </>
+        <div className="review-title-left">
+          <h2>Review this tile</h2>
+          <button
+            className="help-btn help-btn-primary"
+            onClick={() => openHelp("overview")}
+            aria-label="How this page works"
+            title="How this page works"
+          >
+            ℹ️
+          </button>
+        </div>
+
+        <div className="review-tile-info">
+          {center ? (
+            <a
+              className="review-coord"
+              href={mapsUrl(center)}
+              target="_blank"
+              rel="noreferrer"
+              title={patch ? `Tile ${patch.tileId} — open in Google Maps` : undefined}
+            >
+              {formatLatLon(center)} ↗
+            </a>
+          ) : (
+            <span className="review-coord review-coord-unknown">Location unavailable</span>
           )}
-          {patch ? <code>{patch.tileId}</code> : "—"}
-        </span>
+          <span
+            className={`review-acq ${acq.exact ? "" : "review-acq-approx"}`}
+            title={
+              acq.exact
+                ? undefined
+                : "Acquisition window the scan searched — this tile carries no per-scene date"
+            }
+          >
+            {IMAGERY.sensor} · {acq.text}
+          </span>
+        </div>
       </div>
+
+      {reviewedCount > 0 && (
+        <p className="review-session">
+          {reviewedCount} tile{reviewedCount === 1 ? "" : "s"} reviewed this session
+        </p>
+      )}
 
       {error && <div className="error-box">{error}</div>}
 
-      {/* Channel + brush toolbar */}
-      <div className="review-toolbar">
-        <div className="review-toolbar-group">
-          <span className="review-toolbar-label">Channels</span>
-          {CHANNEL_PRESETS.map(p => (
-            <button
-              key={p.id}
-              className={`tab-btn ${preset.id === p.id ? "tab-btn-active" : ""}`}
-              onClick={() => setPreset(p)}
-            >
-              {p.label}
-            </button>
-          ))}
-        </div>
-        <div className="review-toolbar-group">
-          <span className="review-toolbar-label">Brush {brush}px</span>
-          <input
-            type="range"
-            min={1}
-            max={20}
-            value={brush}
-            onChange={e => setBrush(Number(e.target.value))}
-          />
-          <span className="review-toolbar-label">Opacity {Math.round(overlayAlpha * 100)}%</span>
-          <input
-            type="range"
-            min={0}
-            max={100}
-            value={Math.round(overlayAlpha * 100)}
-            onChange={e => setOverlayAlpha(Number(e.target.value) / 100)}
-          />
-          <span className="review-coverage">Coverage {coverage.toFixed(1)}%</span>
-          <span className="review-coverage">Changed {changedPixels.toLocaleString("en-US")} px</span>
-          <button className="tab-btn" onClick={handleReset} disabled={!dirty || busy}>
-            Reset mask
+      {/* Your decision */}
+      <section className="review-zone" role="group" aria-labelledby="decision-head">
+        <div className="review-zone-head">
+          <h3 id="decision-head">Your decision</h3>
+          <button
+            className="help-btn"
+            onClick={() => openHelp("decision")}
+            aria-label="Explain the decision buttons"
+            title="Explain the decision buttons"
+          >
+            ℹ️
           </button>
         </div>
-        <div className="review-toolbar-group">
-          <span className="review-toolbar-label">
-            Min. windthrow {minCoverage === 0 ? "off" : `${minCoverage.toFixed(1)}%`}
-          </span>
-          <input
-            type="range"
-            min={0}
-            max={MAX_MIN_COVERAGE}
-            step={0.1}
-            value={minCoverage}
-            title="Only show tiles whose proposed windthrow covers at least this share of the image"
-            onChange={e => setMinCoverage(Number(e.target.value))}
-            disabled={busy}
-          />
-          {matchCount !== null && (
-            <span className="review-coverage">{matchCount} tiles</span>
-          )}
+
+        <div className="review-decision">
+          <div className="review-decision-item">
+            <button
+              className="review-decision-btn review-decision-accept"
+              onClick={handleSubmit}
+              disabled={busy}
+            >
+              {status === "submitting" ? "…" : dirty ? "💾 Save my corrections" : "✔️ Confirm mask"}
+            </button>
+            <p className="review-decision-caption">the mask is now right</p>
+          </div>
+          <div className="review-decision-item">
+            <button
+              className="review-decision-btn review-decision-reject"
+              onClick={handleNoWindthrow}
+              disabled={busy}
+            >
+              ❌ No windthrow here
+            </button>
+            <p className="review-decision-caption">the model was wrong</p>
+          </div>
+          <div className="review-decision-item">
+            <button
+              className="review-decision-btn review-decision-skip"
+              onClick={handleSkip}
+              disabled={busy}
+            >
+              ⏭️ Skip
+            </button>
+            <p className="review-decision-caption">unsure — show me another</p>
+          </div>
         </div>
-      </div>
+      </section>
 
       {notice && <div className="review-notice">{notice}</div>}
 
-      {/* Main editing area: reject | canvas | submit */}
+      {/* Canvas, centred and alone */}
       <div className="review-stage">
-        <button
-          className="review-side-btn review-reject"
-          onClick={handleNoWindthrow}
-          disabled={busy}
-        >
-          No<br />windthrow
-        </button>
-
         <div className="review-canvas-wrap">
           {status === "loading" && (
             <div className="review-canvas-loading">
               <div className="spinner" />
-              <p>Loading patch…(Can take a moment for the first image)</p>
+              <p>Loading tile… the first one can take a few seconds</p>
             </div>
           )}
           <canvas
@@ -409,43 +511,203 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired }: ExpertRev
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
             onPointerUp={endPaint}
-            onPointerLeave={endPaint}
+            onPointerLeave={() => {
+              endPaint()
+              setProbe(null)
+            }}
           />
         </div>
 
-        <button
-          className="review-side-btn review-submit"
-          onClick={handleSubmit}
+        <div className="review-readout">
+          <Colorbar panel={activePreset.panels[0]} stats={presetStats} />
+          {presetError && (
+            <p className="channels-error">
+              This preset's formula didn't compile ({presetError}) — showing the previous view.
+            </p>
+          )}
+          {probe ? (
+            <div className="channels-probe">
+              <div className="channels-probe-head">
+                <strong>
+                  x {probe.x}, y {probe.y}
+                </strong>
+                {probe.data.overlay && (
+                  <span className={probe.data.overlay.hit ? "channels-probe-in-mask" : "channels-probe-out-mask"}>
+                    {probe.data.overlay.hit ? "rule fires here" : "rule doesn't fire"}
+                  </span>
+                )}
+              </div>
+              <div className="channels-probe-bands">
+                {BAND_LABELS.map((b, i) => (
+                  <span key={b}>
+                    <em>{b}</em> {formatValue(probe.data.bands[i])}
+                  </span>
+                ))}
+                {probe.data.channels.map((c, i) => (
+                  <span key={`c${i}`}>
+                    <em>{c.label}</em> {formatValue(c.value)}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <p className="channels-probe channels-probe-idle">
+              Hover the tile to read the band values under the cursor.
+            </p>
+          )}
+        </div>
+      </div>
+
+      {/* Correct the mask */}
+      <section className="review-zone" role="group" aria-labelledby="correct-mask-head">
+        <div className="review-zone-head">
+          <h3 id="correct-mask-head">Correct the mask</h3>
+          <button
+            className="help-btn"
+            onClick={() => openHelp("add")}
+            aria-label="Explain the mask tools"
+            title="Explain the mask tools"
+          >
+            ℹ️
+          </button>
+        </div>
+
+        <div className="review-toolbar-group">
+          <div className="review-segmented" role="group" aria-label="Paint mode">
+            <button
+              className={`review-segmented-btn ${tool === "add" ? "review-segmented-active" : ""}`}
+              aria-pressed={tool === "add"}
+              onClick={() => setTool("add")}
+            >
+              ➕ Add pixels
+            </button>
+            <button
+              className={`review-segmented-btn ${tool === "remove" ? "review-segmented-active" : ""}`}
+              aria-pressed={tool === "remove"}
+              onClick={() => setTool("remove")}
+            >
+              🧹 Remove pixels
+            </button>
+          </div>
+          <span className="review-toolbar-label">Brush {2 * brush + 1} px</span>
+          <input
+            type="range"
+            min={1}
+            max={20}
+            value={brush}
+            aria-label="Brush size"
+            onChange={e => setBrush(Number(e.target.value))}
+          />
+        </div>
+
+        <div className="review-toolbar-group">
+          <span className="review-toolbar-label">Mask opacity {Math.round(overlayAlpha * 100)}%</span>
+          <input
+            type="range"
+            min={0}
+            max={100}
+            value={Math.round(overlayAlpha * 100)}
+            aria-label="Mask opacity"
+            onChange={e => setOverlayAlpha(Number(e.target.value) / 100)}
+          />
+          <span className="review-coverage">Marked: {coverage.toFixed(1)}% of tile</span>
+        </div>
+
+        <div className="review-toolbar-group">
+          {changedPixels > 0 && (
+            <span className="review-coverage" aria-live="polite">
+              Your edits: {changedPixels.toLocaleString("en-US")} px
+            </span>
+          )}
+          <button className="tab-btn" onClick={handleReset} disabled={!dirty || busy}>
+            ↩️ Undo all edits
+          </button>
+        </div>
+      </section>
+
+      {/* Band combination toolbar */}
+      <div className="review-toolbar" role="group" aria-labelledby="band-combo-label">
+        <div className="review-toolbar-group">
+          <span className="review-toolbar-label" id="band-combo-label">
+            Band combination
+          </span>
+          {BUILTIN_PRESETS.map(p => (
+            <button
+              key={p.id}
+              className={`tab-btn ${activePreset.id === p.id ? "tab-btn-active" : ""}`}
+              onClick={() => setPreset(p)}
+            >
+              {p.label}
+            </button>
+          ))}
+          {customPresets.length > 0 && (
+            <select
+              className="review-custom-select"
+              value={customPresets.some(p => p.id === activePreset.id) ? activePreset.id : ""}
+              onChange={e => {
+                const found = customPresets.find(p => p.id === e.target.value)
+                if (found) setPreset(found)
+              }}
+              aria-label="Custom band combination"
+            >
+              <option value="" disabled>
+                Custom ▾
+              </option>
+              {customPresets.map(p => (
+                <option key={p.id} value={p.id}>
+                  {p.label}
+                </option>
+              ))}
+            </select>
+          )}
+          <button className="tab-btn" onClick={onOpenChannels}>
+            🎨 Customize…
+          </button>
+          <button
+            className="help-btn"
+            onClick={() => openHelp("bands")}
+            aria-label="Explain band combinations"
+            title="Explain band combinations"
+          >
+            ℹ️
+          </button>
+        </div>
+      </div>
+
+      {/* Tile filter */}
+      <div className="review-filter-row">
+        <span className="review-toolbar-label">
+          Show tiles with at least {minCoverage === 0 ? "0" : minCoverage.toFixed(1)}% windthrow
+        </span>
+        <input
+          type="range"
+          min={0}
+          max={MAX_MIN_COVERAGE}
+          step={0.1}
+          value={minCoverage}
+          aria-label="Minimum windthrow coverage filter"
+          onChange={e => setMinCoverage(Number(e.target.value))}
           disabled={busy}
+        />
+        <button
+          className="help-btn"
+          onClick={() => openHelp("filter")}
+          aria-label="Explain the tile filter"
+          title="Explain the tile filter"
         >
-          {status === "submitting" ? "…" : "Submit"}
+          ℹ️
         </button>
+        {matchCount !== null && (
+          <span className="review-coverage">
+            {matchCount} of {totalCount} tiles match
+            {lowMatchNote && " (many tiles have stale/missing coverage data)"}
+          </span>
+        )}
       </div>
 
-      {/* Bottom row: no-change | remove tool | add tool */}
-      <div className="review-tools">
-        <button className="review-tool-btn review-nochange" onClick={handleNoChange} disabled={busy}>
-          No change needed
-        </button>
-        <button
-          className={`review-tool-btn review-remove ${tool === "remove" ? "review-tool-active" : ""}`}
-          onClick={() => setTool("remove")}
-        >
-          Remove pixels
-        </button>
-        <button
-          className={`review-tool-btn review-add ${tool === "add" ? "review-tool-active" : ""}`}
-          onClick={() => setTool("add")}
-        >
-          Add pixels
-        </button>
-      </div>
-
-      <div className="review-footer-row">
-        <button className="tab-btn" onClick={handleSkip} disabled={busy}>
-          Skip → next random tile
-        </button>
-      </div>
+      {helpSection && (
+        <HelpModal section={helpSection} onClose={closeHelp} onOpenChannels={onOpenChannels} />
+      )}
     </div>
   )
 }

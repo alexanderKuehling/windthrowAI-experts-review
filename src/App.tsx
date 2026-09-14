@@ -1,14 +1,16 @@
 import { useState } from "react"
 import { ExpertReviewTab } from "./components/ExpertReviewTab"
+import { ChannelsTab } from "./components/ChannelsTab"
 import { Login } from "./components/Login"
 import { Rankings } from "./components/Rankings"
 import { LegalModal } from "./components/Legal"
 import type { LegalPage } from "./components/Legal"
 import { guestUser, loadStoredUser, logout } from "./utils/auth"
 import type { AuthUser } from "./utils/auth"
+import { AppStateProvider } from "./state/AppState"
 import "./App.css"
 
-type View = "review" | "rankings"
+type View = "review" | "channels" | "rankings"
 
 export default function App() {
   const [user, setUser] = useState<AuthUser | null>(loadStoredUser)
@@ -53,6 +55,12 @@ export default function App() {
                 >
                   Review
                 </button>
+                <button
+                  className={`tab-btn ${view === "channels" ? "tab-btn-active" : ""}`}
+                  onClick={() => setView("channels")}
+                >
+                  Channels
+                </button>
                 {!isGuest && (
                   <button
                     className={`tab-btn ${view === "rankings" ? "tab-btn-active" : ""}`}
@@ -78,14 +86,21 @@ export default function App() {
       <main className="app-main">
         {!user ? (
           <Login onLogin={setUser} onGuest={handleGuest} />
-        ) : view === "review" ? (
-          <ExpertReviewTab
-            reviewer={isGuest ? undefined : user.name}
-            token={isGuest ? undefined : user.token}
-            onSessionExpired={handleLogout}
-          />
         ) : (
-          <Rankings currentUser={user.name} />
+          <AppStateProvider token={isGuest ? undefined : user.token}>
+            {view === "review" ? (
+              <ExpertReviewTab
+                reviewer={isGuest ? undefined : user.name}
+                token={isGuest ? undefined : user.token}
+                onSessionExpired={handleLogout}
+                onOpenChannels={() => setView("channels")}
+              />
+            ) : view === "channels" ? (
+              <ChannelsTab />
+            ) : (
+              <Rankings currentUser={user.name} />
+            )}
+          </AppStateProvider>
         )}
       </main>
 
