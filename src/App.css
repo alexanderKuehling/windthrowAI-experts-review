@@ -623,17 +623,16 @@
   justify-content: center;
 }
 
-.review-canvas-wrap {
+.review-canvas-area {
   position: relative;
-  flex: 0 1 512px;
-  aspect-ratio: 1 / 1;
-  background: var(--bg);
-  border: 1px solid var(--border-mid);
-  border-radius: var(--radius);
-  overflow: hidden;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  flex: 1 1 auto;
+}
+
+/* One grid cell per layer in the active preset — a single-layer preset is
+   just a one-cell grid, capped so it doesn't balloon on a wide screen. */
+.review-canvas-grid {
+  max-width: 900px;
+  margin: 0 auto;
 }
 
 .review-canvas {

@@ -11,8 +11,8 @@ import {
 } from "../utils/review"
 import { SessionExpiredError } from "../utils/review"
 import type { CoverageIndex, ReviewPatch, TileMetaIndex, Verdict } from "../utils/review"
-import { allPresets, BUILTIN_PRESETS, formatValue, probePanel, renderPreset } from "../utils/channels"
-import type { ChannelPreset, PixelProbe } from "../utils/channels"
+import { allPresets, BUILTIN_PRESETS, formatValue, probePanel, renderPanel } from "../utils/channels"
+import type { ChannelPanel, ChannelPreset, PanelStats, PixelProbe } from "../utils/channels"
 import { bboxCenter, formatAcquisition, formatLatLon, mapsUrl } from "../utils/geo"
 import { IMAGERY } from "../constants"
 import { useAppState } from "../state/appStateContext"
@@ -54,12 +54,12 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
   const [coverage, setCoverage] = useState(0)
   const [changedPixels, setChangedPixels] = useState(0)
   const [reviewedCount, setReviewedCount] = useState(0)
-  const [probe, setProbe] = useState<{ x: number; y: number; data: PixelProbe } | null>(null)
+  const [probe, setProbe] = useState<{ panelId: string; x: number; y: number; data: PixelProbe } | null>(null)
 
-  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const canvasRefs = useRef<Map<string, HTMLCanvasElement>>(new Map()) // one canvas per panel
   const nextTileRef = useRef<string | null>(null) // tile prefetched for the next Submit/Skip
-  const bgRef = useRef<Uint8ClampedArray | null>(null) // background RGBA, w*h*4
-  const maskRef = useRef<Uint8Array | null>(null)       // editable mask
+  const bgMapRef = useRef<Map<string, Uint8ClampedArray>>(new Map()) // background RGBA per panel, w*h*4
+  const maskRef = useRef<Uint8Array | null>(null)       // editable mask, shared across every panel
   const paintingRef = useRef(false)
   const toolRef = useRef<Tool>(tool)
   const brushRef = useRef(brush)
@@ -195,26 +195,32 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
     }
   }
 
-  // ── The background composite ──────────────────────────────────────────────
+  // ── The background composites, one per panel ────────────────────────────────
   // Pure in (patch, preset), so it's derived rather than pushed into state by
   // an effect. A custom preset can carry a formula that no longer compiles (a
-  // half-finished edit saved, a band renamed); that's reported next to the
-  // canvas and the previous frame stays up, instead of taking the page down.
+  // half-finished edit saved, a band renamed); that's reported next to that
+  // panel's own canvas and its previous frame stays up, instead of taking the
+  // whole page down.
   const background = useMemo(() => {
     if (!patch) return null
-    const bg = new Uint8ClampedArray(patch.width * patch.height * 4)
-    try {
-      return { bg, stats: renderPreset(patch, activePreset, bg), error: null as string | null }
-    } catch (e) {
-      return { bg: null, stats: null, error: e instanceof Error ? e.message : String(e) }
+    const out: Record<string, { bg: Uint8ClampedArray | null; stats: PanelStats | null; error: string | null }> = {}
+    for (const panel of activePreset.panels) {
+      const bg = new Uint8ClampedArray(patch.width * patch.height * 4)
+      try {
+        out[panel.id] = { bg, stats: renderPanel(patch, panel, bg), error: null }
+      } catch (e) {
+        out[panel.id] = { bg: null, stats: null, error: e instanceof Error ? e.message : String(e) }
+      }
     }
+    return out
   }, [patch, activePreset])
 
-  const presetStats = background?.stats ?? null
-  const presetError = background?.error ?? null
-
   useEffect(() => {
-    if (background?.bg) bgRef.current = background.bg
+    if (background) {
+      for (const [id, r] of Object.entries(background)) {
+        if (r.bg) bgMapRef.current.set(id, r.bg)
+      }
+    }
     redraw()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [background])
@@ -247,38 +253,44 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
     matchCount !== null && minCoverage <= 1 && matchCount < totalCount * 0.5
 
   function redraw() {
-    const canvas = canvasRef.current
-    const bg = bgRef.current
     const mask = maskRef.current
-    if (!canvas || !bg || !mask || !patch) return
+    if (!mask || !patch) return
     const { width: w, height: h } = patch
-    const ctx = canvas.getContext("2d")!
-    const img = ctx.createImageData(w, h)
-    const d = img.data
-    for (let i = 0; i < w * h; i++) {
-      const o = i * 4
-      if (mask[i]) {
-        const a = overlayAlphaRef.current
-        d[o] = bg[o] * (1 - a) + 255 * a
-        d[o + 1] = bg[o + 1] * (1 - a)
-        d[o + 2] = bg[o + 2] * (1 - a)
-        d[o + 3] = 255 // the mask stays visible even over a no-data pixel
-      } else {
-        d[o] = bg[o]
-        d[o + 1] = bg[o + 1]
-        d[o + 2] = bg[o + 2]
-        d[o + 3] = bg[o + 3] // 0 where the formula had no data — let the hatch show
+    const a = overlayAlphaRef.current
+    for (const panel of activePreset.panels) {
+      const canvas = canvasRefs.current.get(panel.id)
+      const bg = bgMapRef.current.get(panel.id)
+      if (!canvas || !bg) continue
+      const ctx = canvas.getContext("2d")!
+      const img = ctx.createImageData(w, h)
+      const d = img.data
+      for (let i = 0; i < w * h; i++) {
+        const o = i * 4
+        if (mask[i]) {
+          d[o] = bg[o] * (1 - a) + 255 * a
+          d[o + 1] = bg[o + 1] * (1 - a)
+          d[o + 2] = bg[o + 2] * (1 - a)
+          d[o + 3] = 255 // the mask stays visible even over a no-data pixel
+        } else {
+          d[o] = bg[o]
+          d[o + 1] = bg[o + 1]
+          d[o + 2] = bg[o + 2]
+          d[o + 3] = bg[o + 3] // 0 where the formula had no data — let the hatch show
+        }
       }
+      ctx.clearRect(0, 0, w, h)
+      ctx.putImageData(img, 0, 0)
     }
-    ctx.clearRect(0, 0, w, h)
-    ctx.putImageData(img, 0, 0)
   }
 
   // ── Painting ──────────────────────────────────────────────────────────────
-  function paintAt(clientX: number, clientY: number) {
-    const canvas = canvasRef.current
+  // A stroke is anchored to whichever panel's canvas the pointer went down on
+  // (pointer capture keeps delivering move/up events to that same canvas), but
+  // it writes into the one mask shared by every panel, so every other panel's
+  // view redraws with it too.
+  function paintAt(canvas: HTMLCanvasElement, clientX: number, clientY: number) {
     const mask = maskRef.current
-    if (!canvas || !mask || !patch) return
+    if (!mask || !patch) return
     const { width: w, height: h } = patch
     const rect = canvas.getBoundingClientRect()
     const px = Math.floor(((clientX - rect.left) / rect.width) * w)
@@ -298,34 +310,32 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
     redraw()
   }
 
-  function handlePointerDown(e: React.PointerEvent) {
+  function handlePointerDown(e: React.PointerEvent<HTMLCanvasElement>) {
     if (status !== "ready") return
-    ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
+    e.currentTarget.setPointerCapture(e.pointerId)
     paintingRef.current = true
-    paintAt(e.clientX, e.clientY)
+    paintAt(e.currentTarget, e.clientX, e.clientY)
   }
-  function handlePointerMove(e: React.PointerEvent) {
-    if (paintingRef.current) paintAt(e.clientX, e.clientY)
-    updateProbe(e.clientX, e.clientY)
+  function handlePointerMove(e: React.PointerEvent<HTMLCanvasElement>, panel: ChannelPanel) {
+    if (paintingRef.current) paintAt(e.currentTarget, e.clientX, e.clientY)
+    updateProbe(e.currentTarget, panel, e.clientX, e.clientY)
   }
 
   // ── Pixel probe ───────────────────────────────────────────────────────────
-  // Reads out the actual numbers under the cursor. Especially worth having on
-  // an index view: it's how a reviewer checks that the colour they're about to
-  // act on corresponds to the value they think it does.
-  function updateProbe(clientX: number, clientY: number) {
-    const canvas = canvasRef.current
-    if (!canvas || !patch) return
+  // Reads out the actual numbers under the cursor, for whichever panel it's
+  // hovering. Especially worth having on an index view: it's how a reviewer
+  // checks that the colour they're about to act on corresponds to the value
+  // they think it does.
+  function updateProbe(canvas: HTMLCanvasElement, panel: ChannelPanel, clientX: number, clientY: number) {
+    if (!patch) return
     const rect = canvas.getBoundingClientRect()
     const x = Math.floor(((clientX - rect.left) / rect.width) * patch.width)
     const y = Math.floor(((clientY - rect.top) / rect.height) * patch.height)
     if (x < 0 || y < 0 || x >= patch.width || y >= patch.height) return
-    const panel = activePreset.panels[0]
-    if (!panel) return
     try {
-      setProbe({ x, y, data: probePanel(patch, panel, y * patch.width + x) })
+      setProbe({ panelId: panel.id, x, y, data: probePanel(patch, panel, y * patch.width + x) })
     } catch {
-      setProbe(null) // broken formula — presetError already says so
+      setProbe(null) // broken formula — that panel's own error box already says so
     }
   }
   function endPaint() {
@@ -493,43 +503,61 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
 
       {notice && <div className="review-notice">{notice}</div>}
 
-      {/* Canvas, centred and alone */}
+      {/* Canvas(es), centred and alone — one per layer in the active preset */}
       <div className="review-stage">
-        <div className="review-canvas-wrap">
+        <div className="review-canvas-area">
           {status === "loading" && (
             <div className="review-canvas-loading">
               <div className="spinner" />
               <p>Loading tile… the first one can take a few seconds</p>
             </div>
           )}
-          <canvas
-            ref={canvasRef}
-            width={patch?.width ?? 256}
-            height={patch?.height ?? 256}
-            className={`review-canvas review-tool-${tool}`}
-            style={{ visibility: status === "loading" ? "hidden" : "visible" }}
-            onPointerDown={handlePointerDown}
-            onPointerMove={handlePointerMove}
-            onPointerUp={endPaint}
-            onPointerLeave={() => {
-              endPaint()
-              setProbe(null)
-            }}
-          />
+          <div className="channels-panel-grid review-canvas-grid">
+            {activePreset.panels.map(panel => (
+              <div className="channels-panel review-panel" key={panel.id}>
+                <canvas
+                  ref={el => {
+                    if (el) canvasRefs.current.set(panel.id, el)
+                    else canvasRefs.current.delete(panel.id)
+                  }}
+                  width={patch?.width ?? 256}
+                  height={patch?.height ?? 256}
+                  className={`channels-canvas review-canvas review-tool-${tool}`}
+                  style={{ visibility: status === "loading" ? "hidden" : "visible" }}
+                  onPointerDown={handlePointerDown}
+                  onPointerMove={e => handlePointerMove(e, panel)}
+                  onPointerUp={endPaint}
+                  onPointerLeave={() => {
+                    endPaint()
+                    setProbe(null)
+                  }}
+                />
+                {activePreset.panels.length > 1 && (
+                  <span className="channels-panel-label">{panel.label}</span>
+                )}
+                <Colorbar
+                  panel={panel}
+                  stats={background?.[panel.id]?.stats ?? null}
+                  compact={activePreset.panels.length > 1}
+                />
+                {background?.[panel.id]?.error && (
+                  <p className="channels-panel-error">
+                    Didn't compile ({background[panel.id].error}) — showing the previous view.
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
 
         <div className="review-readout">
-          <Colorbar panel={activePreset.panels[0]} stats={presetStats} />
-          {presetError && (
-            <p className="channels-error">
-              This preset's formula didn't compile ({presetError}) — showing the previous view.
-            </p>
-          )}
           {probe ? (
             <div className="channels-probe">
               <div className="channels-probe-head">
                 <strong>
                   x {probe.x}, y {probe.y}
+                  {activePreset.panels.length > 1 &&
+                    ` · ${activePreset.panels.find(p => p.id === probe.panelId)?.label ?? ""}`}
                 </strong>
                 {probe.data.overlay && (
                   <span className={probe.data.overlay.hit ? "channels-probe-in-mask" : "channels-probe-out-mask"}>
@@ -552,7 +580,7 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
             </div>
           ) : (
             <p className="channels-probe channels-probe-idle">
-              Hover the tile to read the band values under the cursor.
+              Hover a tile to read the band values under the cursor.
             </p>
           )}
         </div>
