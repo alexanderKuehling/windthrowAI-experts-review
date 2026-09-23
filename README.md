@@ -29,6 +29,12 @@ Configuration lives in [`src/constants.ts`](src/constants.ts):
   came from), it's sent along with each submission so the backend can record
   which round a review belongs to; older indexes without the column still
   work, just without that field.
+- **Tiered tile picking**: `GET {TILE_API_URL}/reviews/summary` returns how
+  many times each tile has been reviewed and by whom. The review tab uses it
+  to favour unreviewed and single-reviewed tiles over ones a reviewer (or
+  someone else) already looked at, instead of picking uniformly at random. If
+  that endpoint is unreachable, every tile looks unreviewed and the picker
+  falls back to a uniform random draw.
 
 Point these at your own dataset / backend by editing `constants.ts`.
 

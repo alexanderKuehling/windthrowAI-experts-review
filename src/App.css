@@ -567,6 +567,12 @@
 }
 .review-acq-approx { font-style: italic; }
 
+.review-tier-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
 .review-session {
   font-size: 12px;
   color: var(--text-muted);

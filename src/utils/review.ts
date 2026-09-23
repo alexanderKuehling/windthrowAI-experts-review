@@ -3,6 +3,7 @@ import {
   COVERAGE_INDEX_URL,
   INPUTS_INDEX_URL,
   REVIEW_API_URL,
+  REVIEW_SUMMARY_API_URL,
   inputTifUrl,
   maskTifUrl,
 } from "../constants"
@@ -65,6 +66,7 @@ export interface TileMeta {
   latMax?: number     // column `lat_max`
   dateFirst?: string  // "YYYY-MM-DD", column `date_first`
   dateLast?: string   // "YYYY-MM-DD", column `date_last`
+  clfProb?: number    // classifier confidence for the tile, column `clf_prob`
 }
 
 export type TileMetaIndex = Record<string, TileMeta>
@@ -111,6 +113,7 @@ export async function fetchTileIndex(): Promise<TileIndex> {
   const latMaxCol = header.indexOf("lat_max")
   const dateFirstCol = header.indexOf("date_first")
   const dateLastCol = header.indexOf("date_last")
+  const clfProbCol = header.indexOf("clf_prob")
   // Added by amazon-scan's export (AUTOMATION_PLAN.md 4.2), last column, same
   // value on every row — take the first non-empty one rather than re-reading it per row.
   const scanIdCol = header.indexOf("scan_id")
@@ -133,6 +136,7 @@ export async function fetchTileIndex(): Promise<TileIndex> {
       latMax: num(cols, latMaxCol),
       dateFirst: str(cols, dateFirstCol),
       dateLast: str(cols, dateLastCol),
+      clfProb: num(cols, clfProbCol),
     }
     meta[id] = m
     if (m.coverage !== undefined) coverage[id] = m.coverage
@@ -149,6 +153,28 @@ export async function fetchCoverageIndex(): Promise<CoverageIndex> {
     if (!res.ok) return {}
     const data: unknown = await res.json()
     return data && typeof data === "object" ? (data as CoverageIndex) : {}
+  } catch {
+    return {}
+  }
+}
+
+// tile_id -> how many reviews it has so far and who submitted them (see
+// tileloading's GET /reviews/summary).
+export interface TileReviewInfo {
+  n: number
+  reviewers: string[]
+}
+export type ReviewSummary = Record<string, TileReviewInfo>
+
+// Load the per-tile review summary, for tiered tile picking (F8). Returns {}
+// on any failure — every tile then looks unreviewed, which degrades exactly
+// to the old uniform-random pick, so a summary outage never blocks review.
+export async function fetchReviewSummary(): Promise<ReviewSummary> {
+  try {
+    const res = await fetch(REVIEW_SUMMARY_API_URL)
+    if (!res.ok) return {}
+    const data: unknown = await res.json()
+    return data && typeof data === "object" ? (data as ReviewSummary) : {}
   } catch {
     return {}
   }

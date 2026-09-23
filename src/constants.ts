@@ -27,6 +27,10 @@ export const COVERAGE_INDEX_URL = `${import.meta.env.BASE_URL}coverage_index.jso
 // Submit endpoint (tileloading backend). Reviews are persisted server-side.
 export const REVIEW_API_URL = `${TILE_API_URL}/reviews`
 
+// Per-tile review counts (n reviews + who reviewed it so far), built from the
+// dataset's file listing. Powers the tiered tile picking in ExpertReviewTab.
+export const REVIEW_SUMMARY_API_URL = `${TILE_API_URL}/reviews/summary`
+
 // Minimal auth: reviewers register / log in with a username + password and
 // receive a session token. The token is attached to each review submission so
 // the backend can attribute it to the reviewer (and reject spoofed names).

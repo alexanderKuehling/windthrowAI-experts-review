@@ -3,6 +3,7 @@ import {
   BAND_LABELS,
   countChangedPixels,
   fetchCoverageIndex,
+  fetchReviewSummary,
   fetchTileIndex,
   loadPatch,
   maskCoverage,
@@ -10,7 +11,7 @@ import {
   submitReview,
 } from "../utils/review"
 import { SessionExpiredError } from "../utils/review"
-import type { CoverageIndex, ReviewPatch, TileMetaIndex, Verdict } from "../utils/review"
+import type { CoverageIndex, ReviewPatch, ReviewSummary, TileMetaIndex, Verdict } from "../utils/review"
 import { allPresets, BUILTIN_PRESETS, formatValue, probePanel, renderPanel } from "../utils/channels"
 import type { ChannelPanel, ChannelPreset, PanelStats, PixelProbe } from "../utils/channels"
 import { bboxCenter, formatAcquisition, formatLatLon, mapsUrl } from "../utils/geo"
@@ -22,11 +23,29 @@ import type { HelpSection } from "./HelpModal"
 
 type Tool = "add" | "remove"
 type Status = "loading" | "ready" | "submitting"
+// Why a tile was picked (F8 tiered sampling): 1 = nobody has reviewed it yet,
+// 2 = exactly one review so far (a second opinion), 3 = two+ reviews, none by
+// me, 4 = I already reviewed it (last resort, when nothing else qualifies).
+type PickTier = 1 | 2 | 3 | 4
 
 const DEFAULT_OVERLAY_ALPHA = 0.45
 const DEFAULT_MIN_COVERAGE = 1 // %, 0 = show every positive tile (no filter)
 const MAX_MIN_COVERAGE = 20    // slider ceiling (only a handful of tiles exceed this)
 const HELP_SEEN_KEY = "windthrowai.helpSeen.v1"
+// Inside tier 1, half the time narrow the pick to the tiles the classifier was
+// least confident about, so uncertain cases don't wait for a random draw.
+const LOW_CONF_FRACTION = 0.2
+const LOW_CONF_PROBABILITY = 0.5
+
+function pickTierLabel(tier: PickTier | null): string | null {
+  switch (tier) {
+    case 1: return "new tile"
+    case 2:
+    case 3: return "second opinion"
+    case 4: return "already reviewed"
+    default: return null
+  }
+}
 
 interface ExpertReviewTabProps {
   reviewer?: string // omitted for anonymous guest reviews
@@ -56,9 +75,12 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
   const [reviewedCount, setReviewedCount] = useState(0)
   const [probe, setProbe] = useState<{ panelId: string; x: number; y: number; data: PixelProbe } | null>(null)
   const [scanId, setScanId] = useState<string | undefined>(undefined) // export round, from inputs_index.csv
+  const [reviewSummary, setReviewSummary] = useState<ReviewSummary>({})
+  const [pickTier, setPickTier] = useState<PickTier | null>(null) // why the current tile was picked (F8)
 
   const canvasRefs = useRef<Map<string, HTMLCanvasElement>>(new Map()) // one canvas per panel
   const nextTileRef = useRef<string | null>(null) // tile prefetched for the next Submit/Skip
+  const nextTierRef = useRef<PickTier | null>(null) // that prefetched tile's pick tier
   const bgMapRef = useRef<Map<string, Uint8ClampedArray>>(new Map()) // background RGBA per panel, w*h*4
   const maskRef = useRef<Uint8Array | null>(null)       // editable mask, shared across every panel
   const paintingRef = useRef(false)
@@ -67,11 +89,15 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
   const overlayAlphaRef = useRef(overlayAlpha)
   const minCoverageRef = useRef(minCoverage)
   const coverageIndexRef = useRef(coverageIndex)
+  const tileMetaRef = useRef(tileMeta)
+  const reviewSummaryRef = useRef(reviewSummary)
   toolRef.current = tool
   brushRef.current = brush
   overlayAlphaRef.current = overlayAlpha
   minCoverageRef.current = minCoverage
   coverageIndexRef.current = coverageIndex
+  tileMetaRef.current = tileMeta
+  reviewSummaryRef.current = reviewSummary
 
   const allPresetsList = useMemo(() => allPresets(customPresets), [customPresets])
 
@@ -102,10 +128,14 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
     }
   }
 
-  // ── Load the tile index (+ coverage) once ─────────────────────────────────
+  // ── Load the tile index (+ coverage + review summary) once ────────────────
   useEffect(() => {
-    fetchTileIndex()
-      .then(async ({ tiles: list, meta, coverage, scanId: id }) => {
+    // fetchReviewSummary() never rejects (it swallows its own errors and
+    // resolves to {}), so a summary outage can't fail this Promise.all — the
+    // tiered picker below just sees every tile as unreviewed, i.e. today's
+    // uniform-random behaviour.
+    Promise.all([fetchTileIndex(), fetchReviewSummary()])
+      .then(async ([{ tiles: list, meta, coverage, scanId: id }, summary]) => {
         if (list.length === 0) throw new Error("No positive tiles available to review.")
         // Prefer coverage from inputs_index.csv (written by the data pipeline).
         // Until the next scan re-exports it, fall back to the shipped static
@@ -116,7 +146,11 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
         setTileMeta(meta)
         setCoverageIndex(index)
         setScanId(id)
-        coverageIndexRef.current = index // ref lags a render; loadRandom needs it now
+        setReviewSummary(summary)
+        // refs lag a render; loadRandom needs today's values right now
+        coverageIndexRef.current = index
+        tileMetaRef.current = meta
+        reviewSummaryRef.current = summary
         void loadRandom(list)
       })
       .catch(e => {
@@ -149,13 +183,57 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
     return candidates[Math.floor(Math.random() * candidates.length)]
   }
 
+  // Tiered tile selection (F8): spend reviewer time where it counts instead of
+  // a uniform draw. Tiles nobody has reviewed go first, then a second opinion
+  // for the tiles pull_data's consensus needs one more vote on, then anything
+  // else not reviewed by this reviewer, and reviewed-by-me tiles only as a
+  // last resort. An empty/unavailable `summary` (fetch failure, or genuinely
+  // no reviews yet) makes every tile tier 1, which is exactly the old uniform
+  // pick among the whole pool — so this degrades safely with no special case.
+  function pickTiered(
+    pool: string[],
+    current: string | undefined,
+    summary: ReviewSummary,
+    meta: TileMetaIndex,
+  ): { tileId: string; tier: PickTier } {
+    const candidates = current && pool.length > 1 ? pool.filter(t => t !== current) : pool
+    const countOf = (t: string) => summary[t]?.n ?? 0
+    const reviewedByMe = (t: string) => !!reviewer && (summary[t]?.reviewers.includes(reviewer) ?? false)
+
+    const tier1 = candidates.filter(t => !reviewedByMe(t) && countOf(t) === 0)
+    if (tier1.length > 0) {
+      const byConfidence = tier1
+        .filter(t => meta[t]?.clfProb !== undefined)
+        .sort((a, b) => meta[a].clfProb! - meta[b].clfProb!)
+      if (byConfidence.length > 0 && Math.random() < LOW_CONF_PROBABILITY) {
+        const n = Math.max(1, Math.ceil(byConfidence.length * LOW_CONF_FRACTION))
+        return { tileId: pickFrom(byConfidence.slice(0, n)), tier: 1 }
+      }
+      return { tileId: pickFrom(tier1), tier: 1 }
+    }
+
+    const tier2 = candidates.filter(t => !reviewedByMe(t) && countOf(t) === 1)
+    if (tier2.length > 0) return { tileId: pickFrom(tier2), tier: 2 }
+
+    const tier3 = candidates.filter(t => !reviewedByMe(t) && countOf(t) >= 2)
+    if (tier3.length > 0) return { tileId: pickFrom(tier3), tier: 3 }
+
+    return { tileId: pickFrom(candidates), tier: 4 }
+  }
+
   // Choose the tile that follows `current` and start downloading it now, so the
   // next Submit/Skip renders from memory instead of waiting on the network.
   function queueNext(list: string[], current: string) {
     const pool = eligibleTiles(list, minCoverageRef.current, coverageIndexRef.current)
-    const next = pool.length > 0 ? pickFrom(pool, current) : null
+    if (pool.length === 0) {
+      nextTileRef.current = null
+      nextTierRef.current = null
+      return
+    }
+    const { tileId: next, tier } = pickTiered(pool, current, reviewSummaryRef.current, tileMetaRef.current)
     nextTileRef.current = next
-    if (next) prefetchPatch(next)
+    nextTierRef.current = tier
+    prefetchPatch(next)
   }
 
   // Load a random eligible tile. Coverage is now known up front from the index,
@@ -179,9 +257,18 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
     // coverage slider may have moved since it was queued), else pick a fresh one.
     const current = patch?.tileId
     const queued = nextTileRef.current
-    const next =
-      queued && queued !== current && pool.includes(queued) ? queued : pickFrom(pool, current)
+    let next: string
+    let tier: PickTier
+    if (queued && queued !== current && pool.includes(queued)) {
+      next = queued
+      tier = nextTierRef.current ?? 1
+    } else {
+      const picked = pickTiered(pool, current, reviewSummaryRef.current, tileMetaRef.current)
+      next = picked.tileId
+      tier = picked.tier
+    }
     nextTileRef.current = null
+    nextTierRef.current = null
 
     try {
       const p = await loadPatch(next)
@@ -189,6 +276,7 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
       setPatch(p)
       setSharedPatch(p)
       setCoverage(maskCoverage(p.mask))
+      setPickTier(tier)
       setStatus("ready")
       queueNext(list, next)
     } catch (e) {
@@ -358,6 +446,20 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
     redraw()
   }
 
+  // Reflect a just-submitted review in the in-memory summary immediately,
+  // rather than waiting ~60s for the backend's own cache to catch up — the
+  // tiered picker (pickTiered) reads this on every subsequent pick.
+  function recordReviewLocally(tileId: string) {
+    setReviewSummary(prev => {
+      const entry = prev[tileId] ?? { n: 0, reviewers: [] }
+      const reviewers =
+        reviewer && !entry.reviewers.includes(reviewer) ? [...entry.reviewers, reviewer] : entry.reviewers
+      const next = { ...prev, [tileId]: { n: entry.n + 1, reviewers } }
+      reviewSummaryRef.current = next
+      return next
+    })
+  }
+
   // ── Submitting ────────────────────────────────────────────────────────────
   async function send(verdict: Verdict, mask: Uint8Array) {
     if (!patch || !tiles) return
@@ -377,6 +479,7 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
         scanId,
       })
       setReviewedCount(c => c + 1)
+      recordReviewLocally(patch.tileId)
       await loadRandom(tiles)
     } catch (e) {
       if (e instanceof SessionExpiredError) {
@@ -405,6 +508,7 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
   const meta = patch ? tileMeta[patch.tileId] : undefined
   const center = bboxCenter(meta)
   const acq = formatAcquisition(meta)
+  const tierLabel = pickTierLabel(pickTier)
 
   return (
     <div className="review-tab">
@@ -445,6 +549,14 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
           >
             {IMAGERY.sensor} · {acq.text}
           </span>
+          {tierLabel && (
+            <span
+              className="review-tier-label"
+              title="Why this tile was picked (F8 tiered sampling)"
+            >
+              {tierLabel}
+            </span>
+          )}
         </div>
       </div>
 
