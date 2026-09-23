@@ -12,6 +12,7 @@ export type HelpSection =
   | "brush"
   | "undo"
   | "decision"
+  | "spotcheck"
   | "filter"
   | "custom"
 
@@ -331,6 +332,48 @@ export function HelpModal({ section, onClose, onOpenChannels }: HelpModalProps) 
                 later — it just moves you to another random tile.
               </li>
             </ul>
+            <p>
+              On a <strong>spot check</strong> tile (blue note above the buttons) there is no red
+              mask, and the buttons change. See the next section.
+            </p>
+          </section>
+
+          <section ref={registerSection} data-section="spotcheck">
+            <h3>Spot checks: tiles the model rejected</h3>
+            <BeforeAfter
+              before={ctx => drawTile(ctx, demo, new Uint8Array(demo.width * demo.height), 0.45)}
+              after={ctx => drawTile(ctx, demo, demo.mask, 0.45)}
+              captionBefore="spot check: the model saw nothing"
+              captionAfter="you found windthrow and painted it"
+            />
+            <p>
+              Almost every tile here was picked by the model because it thinks it shows windthrow.
+              So on its own, reviewing can never reveal windthrow the model <em>missed</em>, or a
+              model that starts flagging plain forest. That's why about 1 in 10 tiles is a random
+              tile the model rejected. It carries a blue <strong>Spot check</strong> note and
+              starts without a red mask.
+            </p>
+            <ul className="help-decision-legend">
+              <li>
+                <span className="help-swatch help-swatch-accept" />{" "}
+                <strong>No windthrow: model is right</strong>: you see nothing. This is the usual
+                answer, and it is just as valuable as finding something.
+              </li>
+              <li>
+                <span className="help-swatch help-swatch-accept" />{" "}
+                <strong>Save: the model missed this</strong>: you painted windthrow with "Add
+                pixels". The button switches to this as soon as anything is red.
+              </li>
+              <li>
+                <span className="help-swatch help-swatch-skip" /> <strong>Skip</strong>: you can't
+                tell, same as on any other tile.
+              </li>
+            </ul>
+            <p>
+              Please judge a spot check as carefully as any other tile: the point is to find what
+              the model overlooks, not to confirm it. The coverage filter below never hides spot
+              checks.
+            </p>
           </section>
 
           <section ref={registerSection} data-section="filter">

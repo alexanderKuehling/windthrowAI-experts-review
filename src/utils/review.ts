@@ -67,14 +67,23 @@ export interface TileMeta {
   dateFirst?: string  // "YYYY-MM-DD", column `date_first`
   dateLast?: string   // "YYYY-MM-DD", column `date_last`
   clfProb?: number    // classifier confidence for the tile, column `clf_prob`
+  kind?: TileKind     // column `kind`; absent = "flagged"
 }
+
+// "flagged": the classifier said windthrow and the model proposes a mask.
+// "control": a random spot-check tile the classifier *rejected* (amazon-scan
+// exports a small fixed sample of them with an empty mask), mixed into review
+// so the misses — and a classifier drifting into flagging plain forest — become
+// measurable at all. Every other reviewed tile was pre-selected by the model.
+export type TileKind = "flagged" | "control"
 
 export type TileMetaIndex = Record<string, TileMeta>
 
 export interface TileIndex {
-  tiles: string[]
-  meta: TileMetaIndex
-  coverage: CoverageIndex // derived; empty when the CSV has no `coverage` column
+  tiles: string[]         // flagged tiles only — the pool the coverage filter applies to
+  controlTiles: string[]  // spot-check tiles; empty until an export writes the `kind` column
+  meta: TileMetaIndex     // both kinds
+  coverage: CoverageIndex // derived, flagged tiles only; empty when the CSV has no `coverage` column
   scanId?: string         // the export round's scan_id (column `scan_id`), same on every row
 }
 
@@ -102,7 +111,7 @@ export async function fetchTileIndex(): Promise<TileIndex> {
   if (!res.ok) throw new Error(`Could not load tile index (${res.status}).`)
   const text = await res.text()
   const lines = text.trim().split(/\r?\n/)
-  if (lines.length < 2) return { tiles: [], meta: {}, coverage: {} }
+  if (lines.length < 2) return { tiles: [], controlTiles: [], meta: {}, coverage: {} }
   const header = lines[0].split(",")
   const idCol = header.indexOf("tile_id")
   if (idCol === -1) throw new Error("inputs_index.csv is missing a tile_id column.")
@@ -117,8 +126,10 @@ export async function fetchTileIndex(): Promise<TileIndex> {
   // Added by amazon-scan's export (AUTOMATION_PLAN.md 4.2), last column, same
   // value on every row — take the first non-empty one rather than re-reading it per row.
   const scanIdCol = header.indexOf("scan_id")
+  const kindCol = header.indexOf("kind")
 
   const tiles: string[] = []
+  const controlTiles: string[] = []
   const meta: TileMetaIndex = {}
   const coverage: CoverageIndex = {}
   let scanId: string | undefined
@@ -126,8 +137,6 @@ export async function fetchTileIndex(): Promise<TileIndex> {
     const cols = line.split(",") // rows shorter than the header are fine: num/str return undefined
     const id = cols[idCol]
     if (!id) continue
-    tiles.push(id)
-
     const m: TileMeta = {
       coverage: num(cols, covCol),
       lonMin: num(cols, lonMinCol),
@@ -137,12 +146,20 @@ export async function fetchTileIndex(): Promise<TileIndex> {
       dateFirst: str(cols, dateFirstCol),
       dateLast: str(cols, dateLastCol),
       clfProb: num(cols, clfProbCol),
+      kind: str(cols, kindCol) === "control" ? "control" : "flagged",
     }
     meta[id] = m
-    if (m.coverage !== undefined) coverage[id] = m.coverage
     if (!scanId) scanId = str(cols, scanIdCol)
+    if (m.kind === "control") {
+      // Kept out of `tiles` and `coverage`: a control's coverage is 0 by
+      // construction, so the coverage filter would hide every one of them.
+      controlTiles.push(id)
+      continue
+    }
+    tiles.push(id)
+    if (m.coverage !== undefined) coverage[id] = m.coverage
   }
-  return { tiles, meta, coverage, scanId }
+  return { tiles, controlTiles, meta, coverage, scanId }
 }
 
 // Load the precomputed coverage index. Returns {} (no filtering) if the asset
@@ -297,6 +314,7 @@ export interface ReviewSubmission {
   reviewer?: string
   token?: string // session token from login; attributes the review server-side
   scanId?: string // the export round this tile was loaded from (see TileIndex.scanId)
+  tileKind?: TileKind // spot-check or model-flagged tile, stored with the review
 }
 
 export async function submitReview(sub: ReviewSubmission): Promise<void> {
@@ -308,6 +326,7 @@ export async function submitReview(sub: ReviewSubmission): Promise<void> {
   form.append("changed_pixels", String(sub.changedPixels ?? 0))
   if (sub.reviewer) form.append("reviewer", sub.reviewer)
   if (sub.scanId) form.append("scan_id", sub.scanId)
+  if (sub.tileKind) form.append("tile_kind", sub.tileKind)
   // For a plain rejection we still send the (untouched) mask so the record is complete.
   const png = await encodeMaskPng(sub.mask, sub.width, sub.height)
   form.append("mask", new File([png], `${sub.tileId}_review.png`, { type: "image/png" }))

@@ -13,6 +13,13 @@ model's proposed mask overlaid, and can:
 - confirm with **No change needed** (mask is correct as-is),
 - **Skip** to another random tile.
 
+About 1 in 10 tiles is a **spot check**: a random tile the model *rejected*
+(`kind=control` in `inputs_index.csv`), shown with a blue note, no proposed mask
+and its own buttons: "No windthrow: model is right", or paint and "Save: the
+model missed this". Spot checks ignore the coverage filter. They are the only way
+reviews can reveal what the model misses, and they feed the retraining gate's
+check against a classifier drifting into flagging plain forest.
+
 Each submission is posted to the review backend, which persists the verdict and
 the resulting mask server-side.
 

@@ -573,6 +573,35 @@
   font-style: italic;
 }
 
+/* Spot-check tiles (TileKind "control"): blue, so they read as a different
+   question than the amber notices and never as an error. */
+.review-tier-label-control {
+  font-style: normal;
+  font-weight: 600;
+  color: var(--info);
+  background: var(--info-bg);
+  border: 1px solid var(--info-border);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+
+.review-control-banner {
+  background: var(--info-bg);
+  color: var(--info);
+  border: 1px solid var(--info-border);
+  border-left-width: 4px;
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  font-size: 13px;
+}
+.review-control-banner p { margin: 4px 0 0; }
+.review-control-banner-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+
 .review-session {
   font-size: 12px;
   color: var(--text-muted);

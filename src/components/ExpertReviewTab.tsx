@@ -36,8 +36,15 @@ const HELP_SEEN_KEY = "windthrowai.helpSeen.v1"
 // least confident about, so uncertain cases don't wait for a random draw.
 const LOW_CONF_FRACTION = 0.2
 const LOW_CONF_PROBABILITY = 0.5
+// Share of picks drawn from the spot-check tiles (tiles the classifier
+// rejected, see TileKind). 1 in 10 keeps them frequent enough that a
+// retraining round's test split holds some, without turning review into
+// scanning empty forest. Uniform within the spot-check pool on purpose: a
+// random sample is what makes the measured miss rate an honest estimate.
+const CONTROL_PICK_PROBABILITY = 0.1
 
-function pickTierLabel(tier: PickTier | null): string | null {
+function pickTierLabel(tier: PickTier | null, isControl: boolean): string | null {
+  if (isControl) return "spot check"
   switch (tier) {
     case 1: return "new tile"
     case 2:
@@ -77,6 +84,7 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
   const [scanId, setScanId] = useState<string | undefined>(undefined) // export round, from inputs_index.csv
   const [reviewSummary, setReviewSummary] = useState<ReviewSummary>({})
   const [pickTier, setPickTier] = useState<PickTier | null>(null) // why the current tile was picked (F8)
+  const [controlTiles, setControlTiles] = useState<string[]>([]) // spot-check pool (see TileKind)
 
   const canvasRefs = useRef<Map<string, HTMLCanvasElement>>(new Map()) // one canvas per panel
   const nextTileRef = useRef<string | null>(null) // tile prefetched for the next Submit/Skip
@@ -91,6 +99,7 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
   const coverageIndexRef = useRef(coverageIndex)
   const tileMetaRef = useRef(tileMeta)
   const reviewSummaryRef = useRef(reviewSummary)
+  const controlTilesRef = useRef(controlTiles)
   toolRef.current = tool
   brushRef.current = brush
   overlayAlphaRef.current = overlayAlpha
@@ -98,6 +107,7 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
   coverageIndexRef.current = coverageIndex
   tileMetaRef.current = tileMeta
   reviewSummaryRef.current = reviewSummary
+  controlTilesRef.current = controlTiles
 
   const allPresetsList = useMemo(() => allPresets(customPresets), [customPresets])
 
@@ -135,7 +145,7 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
     // tiered picker below just sees every tile as unreviewed, i.e. today's
     // uniform-random behaviour.
     Promise.all([fetchTileIndex(), fetchReviewSummary()])
-      .then(async ([{ tiles: list, meta, coverage, scanId: id }, summary]) => {
+      .then(async ([{ tiles: list, controlTiles: controls, meta, coverage, scanId: id }, summary]) => {
         if (list.length === 0) throw new Error("No positive tiles available to review.")
         // Prefer coverage from inputs_index.csv (written by the data pipeline).
         // Until the next scan re-exports it, fall back to the shipped static
@@ -147,10 +157,12 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
         setCoverageIndex(index)
         setScanId(id)
         setReviewSummary(summary)
+        setControlTiles(controls)
         // refs lag a render; loadRandom needs today's values right now
         coverageIndexRef.current = index
         tileMetaRef.current = meta
         reviewSummaryRef.current = summary
+        controlTilesRef.current = controls
         void loadRandom(list)
       })
       .catch(e => {
@@ -195,6 +207,7 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
     current: string | undefined,
     summary: ReviewSummary,
     meta: TileMetaIndex,
+    preferUncertain = true,
   ): { tileId: string; tier: PickTier } {
     const candidates = current && pool.length > 1 ? pool.filter(t => t !== current) : pool
     const countOf = (t: string) => summary[t]?.n ?? 0
@@ -202,6 +215,7 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
 
     const tier1 = candidates.filter(t => !reviewedByMe(t) && countOf(t) === 0)
     if (tier1.length > 0) {
+      if (!preferUncertain) return { tileId: pickFrom(tier1), tier: 1 }
       const byConfidence = tier1
         .filter(t => meta[t]?.clfProb !== undefined)
         .sort((a, b) => meta[a].clfProb! - meta[b].clfProb!)
@@ -221,16 +235,29 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
     return { tileId: pickFrom(candidates), tier: 4 }
   }
 
+  // One pick: a spot-check tile with probability CONTROL_PICK_PROBABILITY, else
+  // a flagged tile that passes the coverage filter (which never applies to spot
+  // checks — their coverage is 0 by construction). null when nothing qualifies.
+  function pickNext(list: string[], current: string | undefined): { tileId: string; tier: PickTier } | null {
+    const controls = controlTilesRef.current
+    if (controls.length > 0 && Math.random() < CONTROL_PICK_PROBABILITY) {
+      return pickTiered(controls, current, reviewSummaryRef.current, tileMetaRef.current, false)
+    }
+    const pool = eligibleTiles(list, minCoverageRef.current, coverageIndexRef.current)
+    if (pool.length === 0) return null
+    return pickTiered(pool, current, reviewSummaryRef.current, tileMetaRef.current)
+  }
+
   // Choose the tile that follows `current` and start downloading it now, so the
   // next Submit/Skip renders from memory instead of waiting on the network.
   function queueNext(list: string[], current: string) {
-    const pool = eligibleTiles(list, minCoverageRef.current, coverageIndexRef.current)
-    if (pool.length === 0) {
+    const picked = pickNext(list, current)
+    if (!picked) {
       nextTileRef.current = null
       nextTierRef.current = null
       return
     }
-    const { tileId: next, tier } = pickTiered(pool, current, reviewSummaryRef.current, tileMetaRef.current)
+    const { tileId: next, tier } = picked
     nextTileRef.current = next
     nextTierRef.current = tier
     prefetchPatch(next)
@@ -254,16 +281,18 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
     setChangedPixels(0)
 
     // Take the prefetched tile when it still passes the current filter (the
-    // coverage slider may have moved since it was queued), else pick a fresh one.
+    // coverage slider may have moved since it was queued; a queued spot check
+    // is exempt from it), else pick a fresh one.
     const current = patch?.tileId
     const queued = nextTileRef.current
     let next: string
     let tier: PickTier
-    if (queued && queued !== current && pool.includes(queued)) {
+    if (queued && queued !== current && (pool.includes(queued) || controlTilesRef.current.includes(queued))) {
       next = queued
       tier = nextTierRef.current ?? 1
     } else {
-      const picked = pickTiered(pool, current, reviewSummaryRef.current, tileMetaRef.current)
+      // pool is non-empty here, so the flagged branch of pickNext always has a candidate
+      const picked = pickNext(list, current) ?? pickTiered(pool, current, reviewSummaryRef.current, tileMetaRef.current)
       next = picked.tileId
       tier = picked.tier
     }
@@ -326,6 +355,7 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
   useEffect(() => {
     if (!tiles || status !== "ready") return
     if (minCoverage <= 0 || coverage >= minCoverage) return
+    if (patch && tileMeta[patch.tileId]?.kind === "control") return // spot checks ignore the filter
     const id = setTimeout(() => void loadRandom(tiles), 250)
     return () => clearTimeout(id)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -477,6 +507,7 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
         reviewer,
         token,
         scanId,
+        tileKind: isControl ? "control" : "flagged",
       })
       setReviewedCount(c => c + 1)
       recordReviewLocally(patch.tileId)
@@ -497,6 +528,14 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
   }
   function handleSubmit() {
     if (!patch || !maskRef.current) return
+    if (isControl) {
+      // A spot check has one question: did the model miss windthrow here? Any
+      // painted pixel means yes ("edited", the drawn mask); none means the
+      // model was right, recorded as a plain "no_windthrow" with an empty mask.
+      const found = maskRef.current.some(v => v !== 0)
+      send(found ? "edited" : "no_windthrow", found ? maskRef.current : new Uint8Array(patch.width * patch.height))
+      return
+    }
     send(dirty ? "edited" : "confirmed", maskRef.current)
   }
   function handleSkip() {
@@ -506,9 +545,10 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
   const busy = status !== "ready"
 
   const meta = patch ? tileMeta[patch.tileId] : undefined
+  const isControl = meta?.kind === "control"
   const center = bboxCenter(meta)
   const acq = formatAcquisition(meta)
-  const tierLabel = pickTierLabel(pickTier)
+  const tierLabel = pickTierLabel(pickTier, isControl)
 
   return (
     <div className="review-tab">
@@ -551,8 +591,12 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
           </span>
           {tierLabel && (
             <span
-              className="review-tier-label"
-              title="Why this tile was picked (F8 tiered sampling)"
+              className={`review-tier-label ${isControl ? "review-tier-label-control" : ""}`}
+              title={
+                isControl
+                  ? "A random tile the model rejected — see the note below"
+                  : "Why this tile was picked (F8 tiered sampling)"
+              }
             >
               {tierLabel}
             </span>
@@ -569,6 +613,28 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
 
       {error && <div className="error-box">{error}</div>}
 
+      {isControl && (
+        <div className="review-control-banner" role="note">
+          <div className="review-control-banner-head">
+            <strong>🔍 Spot check: the model found no windthrow on this tile</strong>
+            <button
+              className="help-btn"
+              onClick={() => openHelp("spotcheck")}
+              aria-label="Why am I seeing a spot check?"
+              title="Why am I seeing a spot check?"
+            >
+              ℹ️
+            </button>
+          </div>
+          <p>
+            That's why there is no red mask. This tile is part of a small random sample of tiles the
+            model <em>rejected</em>, so please look at it as carefully as any other. Do you see
+            windthrow anyway? Paint it with <strong>➕ Add pixels</strong> and save. If not, confirm
+            that the model is right.
+          </p>
+        </div>
+      )}
+
       {/* Your decision */}
       <section className="review-zone" role="group" aria-labelledby="decision-head">
         <div className="review-zone-head">
@@ -584,26 +650,47 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
         </div>
 
         <div className="review-decision">
-          <div className="review-decision-item">
-            <button
-              className="review-decision-btn review-decision-accept"
-              onClick={handleSubmit}
-              disabled={busy}
-            >
-              {status === "submitting" ? "…" : dirty ? "💾 Save my corrections" : "✔️ Confirm mask"}
-            </button>
-            <p className="review-decision-caption">the mask is now right</p>
-          </div>
-          <div className="review-decision-item">
-            <button
-              className="review-decision-btn review-decision-reject"
-              onClick={handleNoWindthrow}
-              disabled={busy}
-            >
-              ❌ No windthrow here
-            </button>
-            <p className="review-decision-caption">the model was wrong</p>
-          </div>
+          {isControl ? (
+            <div className="review-decision-item">
+              <button
+                className="review-decision-btn review-decision-accept"
+                onClick={handleSubmit}
+                disabled={busy}
+              >
+                {status === "submitting"
+                  ? "…"
+                  : coverage > 0
+                    ? "💾 Save: the model missed this"
+                    : "✔️ No windthrow: model is right"}
+              </button>
+              <p className="review-decision-caption">
+                {coverage > 0 ? "your red area is the missed windthrow" : "nothing to mark on this tile"}
+              </p>
+            </div>
+          ) : (
+            <>
+              <div className="review-decision-item">
+                <button
+                  className="review-decision-btn review-decision-accept"
+                  onClick={handleSubmit}
+                  disabled={busy}
+                >
+                  {status === "submitting" ? "…" : dirty ? "💾 Save my corrections" : "✔️ Confirm mask"}
+                </button>
+                <p className="review-decision-caption">the mask is now right</p>
+              </div>
+              <div className="review-decision-item">
+                <button
+                  className="review-decision-btn review-decision-reject"
+                  onClick={handleNoWindthrow}
+                  disabled={busy}
+                >
+                  ❌ No windthrow here
+                </button>
+                <p className="review-decision-caption">the model was wrong</p>
+              </div>
+            </>
+          )}
           <div className="review-decision-item">
             <button
               className="review-decision-btn review-decision-skip"
