@@ -571,6 +571,7 @@
   font-size: 12px;
   color: var(--text-muted);
 }
+.review-scan-id { margin-left: 6px; }
 
 .review-toolbar {
   display: flex;

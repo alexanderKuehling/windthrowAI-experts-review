@@ -73,6 +73,7 @@ export interface TileIndex {
   tiles: string[]
   meta: TileMetaIndex
   coverage: CoverageIndex // derived; empty when the CSV has no `coverage` column
+  scanId?: string         // the export round's scan_id (column `scan_id`), same on every row
 }
 
 // undefined when the column is absent, the cell is missing/empty, or not finite.
@@ -110,10 +111,14 @@ export async function fetchTileIndex(): Promise<TileIndex> {
   const latMaxCol = header.indexOf("lat_max")
   const dateFirstCol = header.indexOf("date_first")
   const dateLastCol = header.indexOf("date_last")
+  // Added by amazon-scan's export (AUTOMATION_PLAN.md 4.2), last column, same
+  // value on every row — take the first non-empty one rather than re-reading it per row.
+  const scanIdCol = header.indexOf("scan_id")
 
   const tiles: string[] = []
   const meta: TileMetaIndex = {}
   const coverage: CoverageIndex = {}
+  let scanId: string | undefined
   for (const line of lines.slice(1)) {
     const cols = line.split(",") // rows shorter than the header are fine: num/str return undefined
     const id = cols[idCol]
@@ -131,8 +136,9 @@ export async function fetchTileIndex(): Promise<TileIndex> {
     }
     meta[id] = m
     if (m.coverage !== undefined) coverage[id] = m.coverage
+    if (!scanId) scanId = str(cols, scanIdCol)
   }
-  return { tiles, meta, coverage }
+  return { tiles, meta, coverage, scanId }
 }
 
 // Load the precomputed coverage index. Returns {} (no filtering) if the asset
@@ -264,6 +270,7 @@ export interface ReviewSubmission {
   changedPixels?: number // pixels changed vs. the proposed mask (see countChangedPixels)
   reviewer?: string
   token?: string // session token from login; attributes the review server-side
+  scanId?: string // the export round this tile was loaded from (see TileIndex.scanId)
 }
 
 export async function submitReview(sub: ReviewSubmission): Promise<void> {
@@ -274,6 +281,7 @@ export async function submitReview(sub: ReviewSubmission): Promise<void> {
   form.append("height", String(sub.height))
   form.append("changed_pixels", String(sub.changedPixels ?? 0))
   if (sub.reviewer) form.append("reviewer", sub.reviewer)
+  if (sub.scanId) form.append("scan_id", sub.scanId)
   // For a plain rejection we still send the (untouched) mask so the record is complete.
   const png = await encodeMaskPng(sub.mask, sub.width, sub.height)
   form.append("mask", new File([png], `${sub.tileId}_review.png`, { type: "image/png" }))

@@ -55,6 +55,7 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
   const [changedPixels, setChangedPixels] = useState(0)
   const [reviewedCount, setReviewedCount] = useState(0)
   const [probe, setProbe] = useState<{ panelId: string; x: number; y: number; data: PixelProbe } | null>(null)
+  const [scanId, setScanId] = useState<string | undefined>(undefined) // export round, from inputs_index.csv
 
   const canvasRefs = useRef<Map<string, HTMLCanvasElement>>(new Map()) // one canvas per panel
   const nextTileRef = useRef<string | null>(null) // tile prefetched for the next Submit/Skip
@@ -104,7 +105,7 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
   // ── Load the tile index (+ coverage) once ─────────────────────────────────
   useEffect(() => {
     fetchTileIndex()
-      .then(async ({ tiles: list, meta, coverage }) => {
+      .then(async ({ tiles: list, meta, coverage, scanId: id }) => {
         if (list.length === 0) throw new Error("No positive tiles available to review.")
         // Prefer coverage from inputs_index.csv (written by the data pipeline).
         // Until the next scan re-exports it, fall back to the shipped static
@@ -114,6 +115,7 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
         setTiles(list)
         setTileMeta(meta)
         setCoverageIndex(index)
+        setScanId(id)
         coverageIndexRef.current = index // ref lags a render; loadRandom needs it now
         void loadRandom(list)
       })
@@ -372,6 +374,7 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
         changedPixels: changed,
         reviewer,
         token,
+        scanId,
       })
       setReviewedCount(c => c + 1)
       await loadRandom(tiles)
@@ -448,6 +451,7 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
       {reviewedCount > 0 && (
         <p className="review-session">
           {reviewedCount} tile{reviewedCount === 1 ? "" : "s"} reviewed this session
+          {scanId && <span className="review-scan-id">· Round: {scanId}</span>}
         </p>
       )}
 

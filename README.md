@@ -24,7 +24,11 @@ Configuration lives in [`src/constants.ts`](src/constants.ts):
 - **Tiles + proposed masks** come from the Hugging Face dataset
   `alexKlg/windthrowAI-dataset-segmentation_results`
   (`inputs_index.csv`, `inputs/<tile_id>.tif`, `masks/<tile_id>.tif`).
-- **Reviews** are submitted to `POST {TILE_API_URL}/reviews`.
+- **Reviews** are submitted to `POST {TILE_API_URL}/reviews`. When
+  `inputs_index.csv` carries a `scan_id` column (the export round the tiles
+  came from), it's sent along with each submission so the backend can record
+  which round a review belongs to; older indexes without the column still
+  work, just without that field.
 
 Point these at your own dataset / backend by editing `constants.ts`.
 
