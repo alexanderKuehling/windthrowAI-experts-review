@@ -1,5 +1,7 @@
 # WindthrowAI — Expert Review
 
+> Operating the review → retrain → rescan loop: see [`LOOP.md`](../LOOP.md) (lives next to the repos, outside git).
+
 A standalone browser tool for expert review of tropical-forest windthrow
 segmentation masks. Reviewers are shown a random positive Landsat patch with the
 model's proposed mask overlaid, and can:
