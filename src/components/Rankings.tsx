@@ -9,27 +9,42 @@ export function Rankings({ currentUser }: { currentUser: string }) {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      setEntries(await fetchRankings())
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setLoading(false)
-    }
+  // State is only set from the fetch's callbacks, never synchronously in the
+  // effect body; `loading` starts true, so the initial load needs no reset.
+  const load = useCallback((isCancelled: () => boolean = () => false) => {
+    fetchRankings()
+      .then(result => {
+        if (isCancelled()) return
+        setEntries(result)
+        setError(null)
+      })
+      .catch(e => {
+        if (!isCancelled()) setError(e instanceof Error ? e.message : String(e))
+      })
+      .finally(() => {
+        if (!isCancelled()) setLoading(false)
+      })
   }, [])
 
   useEffect(() => {
-    void load()
+    let cancelled = false
+    load(() => cancelled)
+    return () => {
+      cancelled = true
+    }
   }, [load])
+
+  const refresh = () => {
+    setLoading(true)
+    setError(null)
+    load()
+  }
 
   return (
     <div className="rankings">
       <div className="rankings-titlebar">
         <h2>Rankings</h2>
-        <button className="tab-btn" onClick={() => void load()} disabled={loading}>
+        <button className="tab-btn" onClick={refresh} disabled={loading}>
           {loading ? "Refreshing…" : "Refresh"}
         </button>
       </div>

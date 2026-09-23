@@ -56,37 +56,31 @@ export function AppStateProvider({ children, token }: AppStateProviderProps) {
     }
   }, [token])
 
-  function commit(next: PresetBundle) {
-    dirtyRef.current = true
-    setBundle(next)
-    saveCustomPresets(next.presets) // local cache, always — guests stop here
-    saveCustomRecipes(next.recipes)
-    if (!token) return
-    pushPresetBundle(token, next)
-      .then(() => setPresetsSyncError(null))
-      .catch(e => setPresetsSyncError(e instanceof Error ? e.message : String(e)))
-  }
+  // The setters are built inside the memo so they always close over the
+  // current bundle *and* token — built outside it, a login that changed only
+  // the token would leave consumers holding setters that push anonymously.
+  const value = useMemo(() => {
+    function commit(next: PresetBundle) {
+      dirtyRef.current = true
+      setBundle(next)
+      saveCustomPresets(next.presets) // local cache, always — guests stop here
+      saveCustomRecipes(next.recipes)
+      if (!token) return
+      pushPresetBundle(token, next)
+        .then(() => setPresetsSyncError(null))
+        .catch(e => setPresetsSyncError(e instanceof Error ? e.message : String(e)))
+    }
 
-  function setCustomPresets(presets: ChannelPreset[]) {
-    commit({ presets, recipes: bundle.recipes })
-  }
-
-  function setCustomRecipes(recipes: Recipe[]) {
-    commit({ presets: bundle.presets, recipes })
-  }
-
-  const value = useMemo(
-    () => ({
+    return {
       patch,
       setPatch,
       customPresets: bundle.presets,
-      setCustomPresets,
+      setCustomPresets: (presets: ChannelPreset[]) => commit({ presets, recipes: bundle.recipes }),
       customRecipes: bundle.recipes,
-      setCustomRecipes,
+      setCustomRecipes: (recipes: Recipe[]) => commit({ presets: bundle.presets, recipes }),
       presetsSyncError,
-    }),
-    [patch, bundle, presetsSyncError],
-  )
+    }
+  }, [patch, bundle, presetsSyncError, token])
 
   return <AppStateContext.Provider value={value}>{children}</AppStateContext.Provider>
 }
