@@ -209,12 +209,12 @@ export function ChannelsTab() {
     setLoadingTile(true)
     setTileError(null)
     try {
-      const { tiles, coverage } = await fetchTileIndex()
+      const { tiles, coverage, meta } = await fetchTileIndex()
       if (tiles.length === 0) throw new Error("No tiles available.")
       const index = Object.keys(coverage).length > 0 ? coverage : await fetchCoverageIndex()
       const pool = Object.keys(index).length > 0 ? tiles.filter(t => (index[t] ?? -1) > 0) : tiles
       const id = pickRandomTile(pool.length > 0 ? pool : tiles)
-      const p = await loadPatch(id)
+      const p = await loadPatch(id, meta[id]?.nbrEncoding)
       setPatch(p)
     } catch (e) {
       setTileError(e instanceof Error ? e.message : String(e))

@@ -29,7 +29,11 @@ type Status = "loading" | "ready" | "submitting"
 type PickTier = 1 | 2 | 3 | 4
 
 const DEFAULT_OVERLAY_ALPHA = 0.45
-const DEFAULT_MIN_COVERAGE = 1 // %, 0 = show every positive tile (no filter)
+// %, 0 = show every positive tile (no filter). Only for an index from before
+// amazon-scan's export rule; one written with it is already filtered to tiles
+// with a windthrow-sized patch, so the filter then starts at 0 — 1% of a tile
+// is 59 ha, bigger than three quarters of real windthrows.
+const DEFAULT_MIN_COVERAGE = 1
 const MAX_MIN_COVERAGE = 20    // slider ceiling (only a handful of tiles exceed this)
 const HELP_SEEN_KEY = "windthrowai.helpSeen.v1"
 // Inside tier 1, half the time narrow the pick to the tiles the classifier was
@@ -145,7 +149,7 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
     // tiered picker below just sees every tile as unreviewed, i.e. today's
     // uniform-random behaviour.
     Promise.all([fetchTileIndex(), fetchReviewSummary()])
-      .then(async ([{ tiles: list, controlTiles: controls, meta, coverage, scanId: id }, summary]) => {
+      .then(async ([{ tiles: list, controlTiles: controls, meta, coverage, scanId: id, exportRule }, summary]) => {
         if (list.length === 0) throw new Error("No positive tiles available to review.")
         // Prefer coverage from inputs_index.csv (written by the data pipeline).
         // Until the next scan re-exports it, fall back to the shipped static
@@ -158,7 +162,9 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
         setScanId(id)
         setReviewSummary(summary)
         setControlTiles(controls)
+        if (exportRule) setMinCoverage(0)
         // refs lag a render; loadRandom needs today's values right now
+        if (exportRule) minCoverageRef.current = 0
         coverageIndexRef.current = index
         tileMetaRef.current = meta
         reviewSummaryRef.current = summary
@@ -260,7 +266,7 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
     const { tileId: next, tier } = picked
     nextTileRef.current = next
     nextTierRef.current = tier
-    prefetchPatch(next)
+    prefetchPatch(next, tileMetaRef.current[next]?.nbrEncoding)
   }
 
   // Load a random eligible tile. Coverage is now known up front from the index,
@@ -300,7 +306,7 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
     nextTierRef.current = null
 
     try {
-      const p = await loadPatch(next)
+      const p = await loadPatch(next, tileMetaRef.current[next]?.nbrEncoding)
       maskRef.current = Uint8Array.from(p.mask)
       setPatch(p)
       setSharedPatch(p)

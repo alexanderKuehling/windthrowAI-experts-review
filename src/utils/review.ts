@@ -60,6 +60,7 @@ async function readAllBands(blob: Blob): Promise<{ width: number; height: number
 // will add the scan's metric columns. Absent columns must never break the app.
 export interface TileMeta {
   coverage?: number   // % of the tile flagged as windthrow  (column `coverage`)
+  maxPatchPx?: number // largest connected windthrow patch in pixels (column `max_patch_px`)
   lonMin?: number     // column `lon_min`
   latMin?: number     // column `lat_min`
   lonMax?: number     // column `lon_max`
@@ -68,10 +69,20 @@ export interface TileMeta {
   dateLast?: string   // "YYYY-MM-DD", column `date_last`
   clfProb?: number    // classifier confidence for the tile, column `clf_prob`
   kind?: TileKind     // column `kind`; absent = "flagged"
+  nbrEncoding?: NbrEncoding // column `nbr_encoding`; absent = "rescaled"
 }
 
-// "flagged": the classifier said windthrow and the model proposes a mask.
-// "control": a random spot-check tile the classifier *rejected* (amazon-scan
+// How a published input stores its NBR band. "raw" is NBR itself (-1…1), what
+// the models were trained on and what amazon-scan writes since 2026-10;
+// "rescaled" is (NBR + 1) / 2 (0…1), every round before. This app keeps NBR
+// rescaled in memory either way — the Channels page and its band math are
+// written for that — so a raw tile is converted on load (fetchPatch).
+export type NbrEncoding = "raw" | "rescaled"
+
+// "flagged": a detection — the classifier said windthrow and the proposed mask
+// has a windthrow-sized patch (amazon-scan's export rule).
+// "control": a random spot-check tile the scan did *not* report (rejected by
+// the classifier, or flagged with no patch passing the rule; amazon-scan
 // exports a small fixed sample of them with an empty mask), mixed into review
 // so the misses — and a classifier drifting into flagging plain forest — become
 // measurable at all. Every other reviewed tile was pre-selected by the model.
@@ -85,6 +96,10 @@ export interface TileIndex {
   meta: TileMetaIndex     // both kinds
   coverage: CoverageIndex // derived, flagged tiles only; empty when the CSV has no `coverage` column
   scanId?: string         // the export round's scan_id (column `scan_id`), same on every row
+  // The index was written with amazon-scan's export rule (it has `max_patch_px`):
+  // every flagged tile already carries a windthrow-sized patch, so the review
+  // tab drops its own coverage filter by default.
+  exportRule: boolean
 }
 
 // undefined when the column is absent, the cell is missing/empty, or not finite.
@@ -111,7 +126,7 @@ export async function fetchTileIndex(): Promise<TileIndex> {
   if (!res.ok) throw new Error(`Could not load tile index (${res.status}).`)
   const text = await res.text()
   const lines = text.trim().split(/\r?\n/)
-  if (lines.length < 2) return { tiles: [], controlTiles: [], meta: {}, coverage: {} }
+  if (lines.length < 2) return { tiles: [], controlTiles: [], meta: {}, coverage: {}, exportRule: false }
   const header = lines[0].split(",")
   const idCol = header.indexOf("tile_id")
   if (idCol === -1) throw new Error("inputs_index.csv is missing a tile_id column.")
@@ -127,6 +142,8 @@ export async function fetchTileIndex(): Promise<TileIndex> {
   // value on every row — take the first non-empty one rather than re-reading it per row.
   const scanIdCol = header.indexOf("scan_id")
   const kindCol = header.indexOf("kind")
+  const nbrCol = header.indexOf("nbr_encoding")
+  const patchCol = header.indexOf("max_patch_px")
 
   const tiles: string[] = []
   const controlTiles: string[] = []
@@ -139,6 +156,7 @@ export async function fetchTileIndex(): Promise<TileIndex> {
     if (!id) continue
     const m: TileMeta = {
       coverage: num(cols, covCol),
+      maxPatchPx: num(cols, patchCol),
       lonMin: num(cols, lonMinCol),
       latMin: num(cols, latMinCol),
       lonMax: num(cols, lonMaxCol),
@@ -147,6 +165,7 @@ export async function fetchTileIndex(): Promise<TileIndex> {
       dateLast: str(cols, dateLastCol),
       clfProb: num(cols, clfProbCol),
       kind: str(cols, kindCol) === "control" ? "control" : "flagged",
+      nbrEncoding: str(cols, nbrCol) === "raw" ? "raw" : "rescaled",
     }
     meta[id] = m
     if (!scanId) scanId = str(cols, scanIdCol)
@@ -159,7 +178,7 @@ export async function fetchTileIndex(): Promise<TileIndex> {
     tiles.push(id)
     if (m.coverage !== undefined) coverage[id] = m.coverage
   }
-  return { tiles, controlTiles, meta, coverage, scanId }
+  return { tiles, controlTiles, meta, coverage, scanId, exportRule: patchCol !== -1 }
 }
 
 // Load the precomputed coverage index. Returns {} (no filtering) if the asset
@@ -219,11 +238,12 @@ const PATCH_CACHE_LIMIT = 8
 const patchCache = new Map<string, Promise<ReviewPatch>>()
 
 // Load a single tile's input imagery + proposed mask, from cache when warm.
-export function loadPatch(tileId: string): Promise<ReviewPatch> {
+// nbrEncoding comes from the tile's inputs_index.csv row (TileMeta.nbrEncoding).
+export function loadPatch(tileId: string, nbrEncoding: NbrEncoding = "rescaled"): Promise<ReviewPatch> {
   const hit = patchCache.get(tileId)
   if (hit) return hit
 
-  const pending = fetchPatch(tileId).catch(e => {
+  const pending = fetchPatch(tileId, nbrEncoding).catch(e => {
     patchCache.delete(tileId) // don't cache failures — a retry should hit the network
     throw e
   })
@@ -236,17 +256,24 @@ export function loadPatch(tileId: string): Promise<ReviewPatch> {
 
 // Warm the cache for a tile the reviewer is likely to see next. Failures are
 // ignored here; they surface when (and if) the tile is actually loaded.
-export function prefetchPatch(tileId: string): void {
-  void loadPatch(tileId).catch(() => {})
+export function prefetchPatch(tileId: string, nbrEncoding: NbrEncoding = "rescaled"): void {
+  void loadPatch(tileId, nbrEncoding).catch(() => {})
 }
 
-async function fetchPatch(tileId: string): Promise<ReviewPatch> {
+async function fetchPatch(tileId: string, nbrEncoding: NbrEncoding): Promise<ReviewPatch> {
   const [inputBlob, maskBlob] = await Promise.all([
     fetchBlob(inputTifUrl(tileId)),
     fetchBlob(maskTifUrl(tileId)),
   ])
 
   const input = await readAllBands(inputBlob)
+  if (nbrEncoding === "raw") {
+    // NBR is band 7 (BAND_LABELS); keep a pixel without data (all bands 0) at 0
+    const nbr = input.bands[6]
+    for (let i = 0; i < nbr.length; i++) {
+      if (input.bands.some((b, k) => k < 6 && b[i] !== 0)) nbr[i] = (nbr[i] + 1) / 2
+    }
+  }
   const maskRead = await readAllBands(maskBlob)
   const maskBand = maskRead.bands[0]
 
