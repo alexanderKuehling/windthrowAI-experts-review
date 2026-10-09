@@ -15,8 +15,12 @@ const HF_RESULTS_BASE = `https://huggingface.co/datasets/${HF_RESULTS_REPO}/reso
 // inputs_index.csv lists every positive tile; inputs/ and masks/ hold the raw
 // 7-band model input and the proposed segmentation mask for each tile_id.
 export const INPUTS_INDEX_URL = `${HF_RESULTS_BASE}/inputs_index.csv`
-export const inputTifUrl = (tileId: string) => `${HF_RESULTS_BASE}/inputs/${tileId}.tif`
-export const maskTifUrl = (tileId: string) => `${HF_RESULTS_BASE}/masks/${tileId}.tif`
+// A round names each tile's files in inputs_index.csv (input_file, mask_file),
+// one subfolder per grid row — Hugging Face caps a folder at 10,000 files.
+// Rounds from before those columns keep everything flat, hence the fallback.
+export const datasetFileUrl = (path: string) => `${HF_RESULTS_BASE}/${path}`
+export const inputTifUrl = (tileId: string, file?: string) => datasetFileUrl(file ?? `inputs/${tileId}.tif`)
+export const maskTifUrl = (tileId: string, file?: string) => datasetFileUrl(file ?? `masks/${tileId}.tif`)
 
 // Precomputed windthrow coverage per tile (share of mask pixels that are
 // windthrow, in %). Built offline by scripts/build-coverage-index.mjs and

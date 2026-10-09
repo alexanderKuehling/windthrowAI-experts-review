@@ -214,7 +214,7 @@ export function ChannelsTab() {
       const index = Object.keys(coverage).length > 0 ? coverage : await fetchCoverageIndex()
       const pool = Object.keys(index).length > 0 ? tiles.filter(t => (index[t] ?? -1) > 0) : tiles
       const id = pickRandomTile(pool.length > 0 ? pool : tiles)
-      const p = await loadPatch(id, meta[id]?.nbrEncoding)
+      const p = await loadPatch(id, meta[id])
       setPatch(p)
     } catch (e) {
       setTileError(e instanceof Error ? e.message : String(e))

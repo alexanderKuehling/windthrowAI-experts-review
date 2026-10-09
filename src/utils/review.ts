@@ -70,6 +70,8 @@ export interface TileMeta {
   clfProb?: number    // classifier confidence for the tile, column `clf_prob`
   kind?: TileKind     // column `kind`; absent = "flagged"
   nbrEncoding?: NbrEncoding // column `nbr_encoding`; absent = "rescaled"
+  inputFile?: string  // repo path of the input, column `input_file`; absent = inputs/<tile_id>.tif
+  maskFile?: string   // repo path of the proposed mask, column `mask_file`; absent = masks/<tile_id>.tif
 }
 
 // How a published input stores its NBR band. "raw" is NBR itself (-1…1), what
@@ -144,6 +146,8 @@ export async function fetchTileIndex(): Promise<TileIndex> {
   const kindCol = header.indexOf("kind")
   const nbrCol = header.indexOf("nbr_encoding")
   const patchCol = header.indexOf("max_patch_px")
+  const inputFileCol = header.indexOf("input_file")
+  const maskFileCol = header.indexOf("mask_file")
 
   const tiles: string[] = []
   const controlTiles: string[] = []
@@ -166,6 +170,8 @@ export async function fetchTileIndex(): Promise<TileIndex> {
       clfProb: num(cols, clfProbCol),
       kind: str(cols, kindCol) === "control" ? "control" : "flagged",
       nbrEncoding: str(cols, nbrCol) === "raw" ? "raw" : "rescaled",
+      inputFile: str(cols, inputFileCol),
+      maskFile: str(cols, maskFileCol),
     }
     meta[id] = m
     if (!scanId) scanId = str(cols, scanIdCol)
@@ -238,12 +244,13 @@ const PATCH_CACHE_LIMIT = 8
 const patchCache = new Map<string, Promise<ReviewPatch>>()
 
 // Load a single tile's input imagery + proposed mask, from cache when warm.
-// nbrEncoding comes from the tile's inputs_index.csv row (TileMeta.nbrEncoding).
-export function loadPatch(tileId: string, nbrEncoding: NbrEncoding = "rescaled"): Promise<ReviewPatch> {
+// `meta` is the tile's inputs_index.csv row: where its files are and how its
+// NBR band is stored. Without it, the flat layout and rescaled NBR of old rounds.
+export function loadPatch(tileId: string, meta?: TileMeta): Promise<ReviewPatch> {
   const hit = patchCache.get(tileId)
   if (hit) return hit
 
-  const pending = fetchPatch(tileId, nbrEncoding).catch(e => {
+  const pending = fetchPatch(tileId, meta).catch(e => {
     patchCache.delete(tileId) // don't cache failures — a retry should hit the network
     throw e
   })
@@ -256,18 +263,18 @@ export function loadPatch(tileId: string, nbrEncoding: NbrEncoding = "rescaled")
 
 // Warm the cache for a tile the reviewer is likely to see next. Failures are
 // ignored here; they surface when (and if) the tile is actually loaded.
-export function prefetchPatch(tileId: string, nbrEncoding: NbrEncoding = "rescaled"): void {
-  void loadPatch(tileId, nbrEncoding).catch(() => {})
+export function prefetchPatch(tileId: string, meta?: TileMeta): void {
+  void loadPatch(tileId, meta).catch(() => {})
 }
 
-async function fetchPatch(tileId: string, nbrEncoding: NbrEncoding): Promise<ReviewPatch> {
+async function fetchPatch(tileId: string, meta?: TileMeta): Promise<ReviewPatch> {
   const [inputBlob, maskBlob] = await Promise.all([
-    fetchBlob(inputTifUrl(tileId)),
-    fetchBlob(maskTifUrl(tileId)),
+    fetchBlob(inputTifUrl(tileId, meta?.inputFile)),
+    fetchBlob(maskTifUrl(tileId, meta?.maskFile)),
   ])
 
   const input = await readAllBands(inputBlob)
-  if (nbrEncoding === "raw") {
+  if (meta?.nbrEncoding === "raw") {
     // NBR is band 7 (BAND_LABELS); keep a pixel without data (all bands 0) at 0
     const nbr = input.bands[6]
     for (let i = 0; i < nbr.length; i++) {

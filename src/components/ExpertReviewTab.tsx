@@ -266,7 +266,7 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
     const { tileId: next, tier } = picked
     nextTileRef.current = next
     nextTierRef.current = tier
-    prefetchPatch(next, tileMetaRef.current[next]?.nbrEncoding)
+    prefetchPatch(next, tileMetaRef.current[next])
   }
 
   // Load a random eligible tile. Coverage is now known up front from the index,
@@ -306,7 +306,7 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
     nextTierRef.current = null
 
     try {
-      const p = await loadPatch(next, tileMetaRef.current[next]?.nbrEncoding)
+      const p = await loadPatch(next, tileMetaRef.current[next])
       maskRef.current = Uint8Array.from(p.mask)
       setPatch(p)
       setSharedPatch(p)
