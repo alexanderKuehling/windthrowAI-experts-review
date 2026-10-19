@@ -989,7 +989,7 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
         </div>
       )}
 
-      {/* Canvas(es), centred and alone — one per layer in the active preset */}
+      {/* Canvas(es), one per layer in the active preset, with their tools in one card */}
       <div className="review-stage">
         <div className="review-canvas-area" style={{ flexBasis: `${panelRowWidth}px` }}>
           {status === "loading" && (
@@ -1098,124 +1098,131 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
           </div>
         </div>
 
-        <div className="review-readout">
-          {probe ? (
-            <div className="channels-probe">
-              <div className="channels-probe-head">
-                <strong>
-                  x {probe.x}, y {probe.y}
-                  {activePreset.panels.length > 1 &&
-                    ` · ${activePreset.panels.find(p => p.id === probe.panelId)?.label ?? ""}`}
-                </strong>
-                {probe.data.overlay && (
-                  <span className={probe.data.overlay.hit ? "channels-probe-in-mask" : "channels-probe-out-mask"}>
-                    {probe.data.overlay.hit ? "rule fires here" : "rule doesn't fire"}
-                  </span>
-                )}
-              </div>
-              <div className="channels-probe-bands">
-                {BAND_LABELS.map((b, i) => (
-                  <span key={b}>
-                    <em>{b}</em> {formatValue(probe.data.bands[i])}
-                  </span>
-                ))}
-                {probe.data.channels.map((c, i) => (
-                  <span key={`c${i}`}>
-                    <em>{c.label}</em> {formatValue(c.value)}
-                  </span>
-                ))}
-              </div>
+        {/* Beside the tile (below it when there's no room): the mask tools,
+            then the band values under the cursor */}
+        <div className="review-side">
+          <section className="review-tools" role="group" aria-labelledby="correct-mask-head">
+            <div className="review-zone-head">
+              <h3 id="correct-mask-head">Correct the mask</h3>
+              <button
+                className="help-btn"
+                onClick={() => openHelp("add")}
+                aria-label="Explain the mask tools"
+                title="Explain the mask tools"
+              >
+                ℹ️
+              </button>
             </div>
-          ) : (
-            <p className="channels-probe channels-probe-idle">
-              Hover a tile to read the band values under the cursor.
-            </p>
-          )}
+
+            <div className="review-segmented" role="group" aria-label="Paint mode">
+              <button
+                className={`review-segmented-btn ${tool === "add" ? "review-segmented-active" : ""}`}
+                aria-pressed={tool === "add"}
+                onClick={() => setTool("add")}
+              >
+                ➕ Add pixels
+              </button>
+              <button
+                className={`review-segmented-btn ${tool === "remove" ? "review-segmented-active" : ""}`}
+                aria-pressed={tool === "remove"}
+                onClick={() => setTool("remove")}
+              >
+                🧹 Remove pixels
+              </button>
+            </div>
+
+            <div className="review-slider">
+              <span className="review-toolbar-label">Brush {2 * brush + 1} px</span>
+              <input
+                type="range"
+                min={0}
+                max={20}
+                value={brush}
+                aria-label="Brush size"
+                onChange={e => setBrush(Number(e.target.value))}
+              />
+            </div>
+
+            <div className="review-slider">
+              <span className="review-toolbar-label">Mask opacity {Math.round(overlayAlpha * 100)}%</span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={Math.round(overlayAlpha * 100)}
+                aria-label="Mask opacity"
+                onChange={e => showMask(Number(e.target.value) / 100)}
+              />
+            </div>
+
+            <div className="review-toolbar-group">
+              <span className="review-coverage">Marked: {coverage.toFixed(1)}% of tile</span>
+              {changedPixels > 0 && (
+                <span className="review-coverage" aria-live="polite">
+                  · Your edits: {changedPixels.toLocaleString("en-US")} px
+                </span>
+              )}
+            </div>
+
+            <div className="review-toolbar-group">
+              <button
+                className="tab-btn"
+                onClick={undo}
+                disabled={history.undo === 0 || busy}
+                title={`Undo the last stroke (${UNDO_KEYS})`}
+              >
+                ↶ Undo
+              </button>
+              <button
+                className="tab-btn"
+                onClick={redo}
+                disabled={history.redo === 0 || busy}
+                title={`Redo (${REDO_KEYS})`}
+              >
+                ↷ Redo
+              </button>
+              <button className="tab-btn" onClick={handleReset} disabled={!dirty || busy}>
+                ↩️ Undo all edits
+              </button>
+            </div>
+          </section>
+
+          <div className="review-readout">
+            {probe ? (
+              <div className="channels-probe">
+                <div className="channels-probe-head">
+                  <strong>
+                    x {probe.x}, y {probe.y}
+                    {activePreset.panels.length > 1 &&
+                      ` · ${activePreset.panels.find(p => p.id === probe.panelId)?.label ?? ""}`}
+                  </strong>
+                  {probe.data.overlay && (
+                    <span className={probe.data.overlay.hit ? "channels-probe-in-mask" : "channels-probe-out-mask"}>
+                      {probe.data.overlay.hit ? "rule fires here" : "rule doesn't fire"}
+                    </span>
+                  )}
+                </div>
+                <div className="channels-probe-bands">
+                  {BAND_LABELS.map((b, i) => (
+                    <span key={b}>
+                      <em>{b}</em> {formatValue(probe.data.bands[i])}
+                    </span>
+                  ))}
+                  {probe.data.channels.map((c, i) => (
+                    <span key={`c${i}`}>
+                      <em>{c.label}</em> {formatValue(c.value)}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <p className="channels-probe channels-probe-idle">
+                Hover a tile to read the band values under the cursor.
+              </p>
+            )}
+          </div>
         </div>
       </div>
-
-      {/* Correct the mask */}
-      <section className="review-zone" role="group" aria-labelledby="correct-mask-head">
-        <div className="review-zone-head">
-          <h3 id="correct-mask-head">Correct the mask</h3>
-          <button
-            className="help-btn"
-            onClick={() => openHelp("add")}
-            aria-label="Explain the mask tools"
-            title="Explain the mask tools"
-          >
-            ℹ️
-          </button>
-        </div>
-
-        <div className="review-toolbar-group">
-          <div className="review-segmented" role="group" aria-label="Paint mode">
-            <button
-              className={`review-segmented-btn ${tool === "add" ? "review-segmented-active" : ""}`}
-              aria-pressed={tool === "add"}
-              onClick={() => setTool("add")}
-            >
-              ➕ Add pixels
-            </button>
-            <button
-              className={`review-segmented-btn ${tool === "remove" ? "review-segmented-active" : ""}`}
-              aria-pressed={tool === "remove"}
-              onClick={() => setTool("remove")}
-            >
-              🧹 Remove pixels
-            </button>
-          </div>
-          <span className="review-toolbar-label">Brush {2 * brush + 1} px</span>
-          <input
-            type="range"
-            min={0}
-            max={20}
-            value={brush}
-            aria-label="Brush size"
-            onChange={e => setBrush(Number(e.target.value))}
-          />
-        </div>
-
-        <div className="review-toolbar-group">
-          <span className="review-toolbar-label">Mask opacity {Math.round(overlayAlpha * 100)}%</span>
-          <input
-            type="range"
-            min={0}
-            max={100}
-            value={Math.round(overlayAlpha * 100)}
-            aria-label="Mask opacity"
-            onChange={e => showMask(Number(e.target.value) / 100)}
-          />
-          <span className="review-coverage">Marked: {coverage.toFixed(1)}% of tile</span>
-        </div>
-
-        <div className="review-toolbar-group">
-          {changedPixels > 0 && (
-            <span className="review-coverage" aria-live="polite">
-              Your edits: {changedPixels.toLocaleString("en-US")} px
-            </span>
-          )}
-          <button
-            className="tab-btn"
-            onClick={undo}
-            disabled={history.undo === 0 || busy}
-            title={`Undo the last stroke (${UNDO_KEYS})`}
-          >
-            ↶ Undo
-          </button>
-          <button
-            className="tab-btn"
-            onClick={redo}
-            disabled={history.redo === 0 || busy}
-            title={`Redo (${REDO_KEYS})`}
-          >
-            ↷ Redo
-          </button>
-          <button className="tab-btn" onClick={handleReset} disabled={!dirty || busy}>
-            ↩️ Undo all edits
-          </button>
-        </div>
-      </section>
 
       {/* Band combination toolbar */}
       <div className="review-toolbar" role="group" aria-labelledby="band-combo-label">

@@ -659,17 +659,46 @@
   flex-wrap: wrap;
 }
 
-/* Canvas, centred and alone */
-/* The canvas area asks for the width its plots need (flex-basis, set from the
-   size slider); the probe readout sits beside it while there's room and
-   wraps below once the plots are wider. */
+/* The tile and its tools, one card. The canvas area asks for the width its
+   plots need (flex-basis, set from the size slider); the side column (mask
+   tools, then the probe readout) sits beside it while there's room and wraps
+   below once the plots are wider. */
 .review-stage {
   display: flex;
   flex-wrap: wrap;
-  align-items: stretch;
-  gap: 16px;
+  align-items: flex-start;
+  gap: 16px 24px;
   justify-content: center;
+  padding: 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
 }
+
+.review-side {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  flex: 1 1 280px;
+  max-width: 520px;
+}
+
+.review-tools {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+/* Label + slider on one row; the fixed label width keeps the sliders lined up. */
+.review-slider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+.review-slider .review-toolbar-label { flex: 0 0 120px; }
+.review-slider input[type="range"] { flex: 1; min-width: 0; }
 
 .review-canvas-area {
   position: relative;
@@ -1322,14 +1351,11 @@
   margin-right: 2px;
 }
 
-/* Legend + probe under the review canvas. */
+/* Probe under the mask tools, beside the review canvas. */
 .review-readout {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  flex: 1 1 280px;
-  max-width: 520px;
-  margin: 10px auto 0;
 }
 
 /* No-data is drawn transparent, so the canvas needs a ground that reads as
