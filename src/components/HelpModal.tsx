@@ -180,9 +180,41 @@ export function HelpModal({ section, onClose, onOpenChannels }: HelpModalProps) 
               ))}
             </div>
             <p>
-              Each combination shows the same tile through different bands. True colour looks
-              natural; colour infrared and SWIR make vegetation stress and bare ground stand out;
-              NBR highlights burn/disturbance signal in greyscale.
+              Each combination shows the same tile through different Landsat bands. Switching only
+              changes how the imagery is drawn; the red mask and your edits stay as they are, so
+              flip between them freely before you decide.
+            </p>
+            <ul>
+              <li>
+                <strong>True colour</strong>: roughly what the eye would see. Fallen trees show as
+                lighter, brownish patches in the dark green canopy.
+              </li>
+              <li>
+                <strong>Colour infrared</strong>: healthy canopy glows red. Damaged or fallen
+                trees look duller, which makes the edge of a scar easier to trace.
+              </li>
+              <li>
+                <strong>SWIR</strong>: intact forest is green; bare wood, soil and dry debris
+                stand out in pink to brown tones.
+              </li>
+              <li>
+                <strong>NBR</strong>: a single index on a red → green ramp. Green is intact
+                canopy, yellow to red is disturbance.
+              </li>
+              <li>
+                <strong>Canopy moisture (NDMI)</strong>: water in the leaves on a brown → teal
+                ramp. Brown means dry, often a sign of damaged canopy.
+              </li>
+              <li>
+                <strong>Compare all</strong>: true colour, colour infrared, SWIR and NBR side by
+                side.
+              </li>
+            </ul>
+            <p>
+              These are only starting points. There is a whole tab just for channel settings,{" "}
+              <strong>Channels</strong> in the header (or <strong>🎨 Customize…</strong> next to
+              these buttons), where you can build your own views. See{" "}
+              <em>Custom band combinations</em> at the end of this guide.
             </p>
           </section>
 
@@ -406,8 +438,47 @@ export function HelpModal({ section, onClose, onOpenChannels }: HelpModalProps) 
           </section>
 
           <section ref={registerSection} data-section="custom">
-            <h3>Custom band combinations</h3>
-            <p>Want to see the imagery through your own formula, like a custom vegetation index?</p>
+            <h3>Custom band combinations: the Channels tab</h3>
+            <p>
+              The band combination buttons are fixed. To look at a tile your own way, open the{" "}
+              <strong>Channels</strong> tab in the header, next to Review. It's a separate page
+              just for channel settings, and it opens on the tile you're reviewing, so you tune
+              the view on exactly the imagery in front of you. There you can:
+            </p>
+            <ul>
+              <li>
+                <strong>Mix a colour composite</strong>: choose which band, or which formula,
+                drives red, green and blue.
+              </li>
+              <li>
+                <strong>Show a single index</strong> such as NDVI, NDMI or NBR on a colour ramp,
+                with your own value range and optional class breaks.
+              </li>
+              <li>
+                <strong>Write formulas</strong> like <code>(nIR - R) / (nIR + R)</code>, or pick
+                one from the index library. Formulas you save by name are kept for later.
+              </li>
+              <li>
+                <strong>Adjust contrast</strong>: one range for all three channels to keep the
+                colour balance, or one per channel for maximum contrast.
+              </li>
+              <li>
+                <strong>Add a threshold overlay</strong>: a rule painted on top of the image, to
+                see where your own idea of windthrow disagrees with the model's mask.
+              </li>
+              <li>
+                <strong>Stack several layers</strong> in one preset; on the Review tab they show
+                side by side, like Compare all.
+              </li>
+            </ul>
+            <p>
+              Built-in combinations can't be edited directly. Use <strong>Duplicate as new</strong>{" "}
+              to start from one, or <strong>Start new preset</strong> for a blank one. After{" "}
+              <strong>Save preset</strong>, it appears in the <strong>Custom ▾</strong> menu next to
+              the band combination buttons here. When you're signed in, your presets and saved
+              formulas follow your account to other devices; in guest mode they stay in this
+              browser only.
+            </p>
             <button
               className="tab-btn tab-btn-active"
               onClick={() => {
