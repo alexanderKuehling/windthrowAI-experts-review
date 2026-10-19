@@ -17,7 +17,7 @@ export interface ReviewPatch {
   tileId: string
   width: number
   height: number
-  bands: Float32Array[]  // 7 bands: R G B nIR swIR1 swIR2 NBR (raw reflectance)
+  bands: Float32Array[]  // 7 bands: R G B nIR swIR1 swIR2 NBR (raw reflectance), NaN = no-data
   mask: Uint8Array       // proposed mask, 0 | 1, length = width * height
 }
 
@@ -275,11 +275,19 @@ async function fetchPatch(tileId: string, meta?: TileMeta): Promise<ReviewPatch>
   ])
 
   const input = await readAllBands(inputBlob)
-  if (meta?.nbrEncoding === "raw") {
-    // NBR is band 7 (BAND_LABELS); keep a pixel without data (all bands 0) at 0
-    const nbr = input.bands[6]
-    for (let i = 0; i < nbr.length; i++) {
-      if (input.bands.some((b, k) => k < 6 && b[i] !== 0)) nbr[i] = (nbr[i] + 1) / 2
+  // The scan fills a pixel without a clear observation (cloud, shadow, outside
+  // every scene) with 0 in every band, and the web encoding keeps that 0. Make
+  // it NaN, which the band math and renderer treat as no-data: drawn see-through
+  // and left out of the contrast stretch, not passed off as zero reflectance.
+  // Real surface reflectance is never 0 in all six spectral bands at once.
+  const spectral = input.bands.slice(0, 6)
+  const nbr = input.bands[6] // BAND_LABELS
+  const rawNbr = meta?.nbrEncoding === "raw"
+  for (let i = 0; i < nbr.length; i++) {
+    if (spectral.every(b => b[i] === 0)) {
+      for (const b of input.bands) b[i] = NaN
+    } else if (rawNbr) {
+      nbr[i] = (nbr[i] + 1) / 2
     }
   }
   const maskRead = await readAllBands(maskBlob)

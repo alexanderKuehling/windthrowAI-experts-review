@@ -751,63 +751,116 @@ export function ChannelsTab() {
               <span className="channels-field-label">Contrast</span>
               <div className="channels-row">
                 <select
-                  value={activePanel.stretch}
+                  value={activeDomain.kind === "fixed" ? "fixed" : "percentile"}
                   disabled={isBuiltin}
-                  aria-label="Stretch mode"
-                  onChange={e =>
-                    updateActive(p => ({ ...p, stretch: e.target.value as ChannelPanel["stretch"] }))
-                  }
+                  aria-label="Range mode"
+                  onChange={e => {
+                    if (e.target.value === "fixed") {
+                      // Start from what this tile shows now: one range spanning all three channels.
+                      const r = activeStats?.ranges
+                      setDomain({
+                        kind: "fixed",
+                        min: r ? Number(Math.min(...r.map(x => x[0])).toFixed(3)) : 0,
+                        max: r ? Number(Math.max(...r.map(x => x[1])).toFixed(3)) : 0.1,
+                      })
+                    } else {
+                      setDomain({ kind: "percentile", low: activePanel.low ?? 2, high: activePanel.high ?? 98 })
+                    }
+                  }}
                 >
-                  <option value="shared">One range for all three (keeps colour balance)</option>
-                  <option value="per-channel">A range per channel (maximum contrast)</option>
+                  <option value="percentile">Stretch to this tile (percentile)</option>
+                  <option value="fixed">Fixed reflectance range</option>
                 </select>
-              </div>
-              <div className="channels-percentile-row">
-                <label>
-                  Low %
-                  <input
-                    type="number"
-                    min={0}
-                    max={100}
-                    step={0.5}
-                    value={activePanel.low ?? 2}
+                {activeDomain.kind !== "fixed" && (
+                  <select
+                    value={activePanel.stretch}
                     disabled={isBuiltin}
-                    onChange={e => {
-                      const low = Number(e.target.value)
-                      updateActive(p => ({
-                        ...p,
-                        low,
-                        domain:
-                          resolveDomain(p).kind === "percentile"
-                            ? { kind: "percentile", low, high: p.high ?? 98 }
-                            : p.domain,
-                      }))
-                    }}
-                  />
-                </label>
-                <label>
-                  High %
-                  <input
-                    type="number"
-                    min={0}
-                    max={100}
-                    step={0.5}
-                    value={activePanel.high ?? 98}
-                    disabled={isBuiltin}
-                    onChange={e => {
-                      const high = Number(e.target.value)
-                      updateActive(p => ({
-                        ...p,
-                        high,
-                        domain:
-                          resolveDomain(p).kind === "percentile"
-                            ? { kind: "percentile", low: p.low ?? 2, high }
-                            : p.domain,
-                      }))
-                    }}
-                  />
-                </label>
+                    aria-label="Stretch mode"
+                    onChange={e =>
+                      updateActive(p => ({ ...p, stretch: e.target.value as ChannelPanel["stretch"] }))
+                    }
+                  >
+                    <option value="shared">One range for all three (keeps colour balance)</option>
+                    <option value="per-channel">A range per channel (maximum contrast)</option>
+                  </select>
+                )}
               </div>
+              {activeDomain.kind === "fixed" ? (
+                <div className="channels-percentile-row">
+                  <label>
+                    Min
+                    <input
+                      type="number"
+                      step={0.01}
+                      value={activeDomain.min}
+                      disabled={isBuiltin}
+                      onChange={e => setDomain({ ...activeDomain, min: Number(e.target.value) })}
+                    />
+                  </label>
+                  <label>
+                    Max
+                    <input
+                      type="number"
+                      step={0.01}
+                      value={activeDomain.max}
+                      disabled={isBuiltin}
+                      onChange={e => setDomain({ ...activeDomain, max: Number(e.target.value) })}
+                    />
+                  </label>
+                </div>
+              ) : (
+                <div className="channels-percentile-row">
+                  <label>
+                    Low %
+                    <input
+                      type="number"
+                      min={0}
+                      max={100}
+                      step={0.5}
+                      value={activePanel.low ?? 2}
+                      disabled={isBuiltin}
+                      onChange={e => {
+                        const low = Number(e.target.value)
+                        updateActive(p => ({
+                          ...p,
+                          low,
+                          domain:
+                            resolveDomain(p).kind === "percentile"
+                              ? { kind: "percentile", low, high: p.high ?? 98 }
+                              : p.domain,
+                        }))
+                      }}
+                    />
+                  </label>
+                  <label>
+                    High %
+                    <input
+                      type="number"
+                      min={0}
+                      max={100}
+                      step={0.5}
+                      value={activePanel.high ?? 98}
+                      disabled={isBuiltin}
+                      onChange={e => {
+                        const high = Number(e.target.value)
+                        updateActive(p => ({
+                          ...p,
+                          high,
+                          domain:
+                            resolveDomain(p).kind === "percentile"
+                              ? { kind: "percentile", low: p.low ?? 2, high }
+                              : p.domain,
+                        }))
+                      }}
+                    />
+                  </label>
+                </div>
+              )}
+              <p className="channels-hint">
+                {activeDomain.kind === "fixed"
+                  ? "One range for all three bands: a colour means the same reflectance on every tile."
+                  : "Fills the range on every tile: more contrast, but the same colour means a different reflectance on the next tile."}
+              </p>
               <label className="channels-slider-row">
                 <span>Gamma {(activePanel.gamma ?? 1).toFixed(1)}</span>
                 <input

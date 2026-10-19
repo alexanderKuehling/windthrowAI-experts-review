@@ -92,14 +92,29 @@ export function emptyPanel(): ChannelPanel {
   }
 }
 
+// How the built-in colour composites are drawn. True colour gets one fixed
+// reflectance range for all three bands, so its hue stays true and means the
+// same on every tile: 0…0.08 keeps closed canopy (R≈0.03, G≈0.05, B≈0.02) mid
+// scale and lets bare soil and debris run bright. A per-tile percentile stretch
+// put its low end just under the canopy values and blew their small differences
+// up into neon green. The false-colour composites mix bands about ten times
+// apart (nIR≈0.3 against R, G, swIR2≈0.03–0.05), so each channel gets its own
+// stretch; a shared one left the weak channels at the bottom of the scale and
+// the image a flat red (CIR) or green (SWIR), with the red mask lost on the red.
+const TRUE_COLOUR_DISPLAY: Pick<ChannelPanel, "stretch" | "domain" | "gamma"> = {
+  stretch: "shared",
+  domain: { kind: "fixed", min: 0, max: 0.08 },
+  gamma: 1.4,
+}
+const FALSE_COLOUR_DISPLAY: Pick<ChannelPanel, "stretch"> = { stretch: "per-channel" }
+
 // Built-ins — ids are stable (persisted as the active preset, used as React
-// keys). The three colour composites render exactly as they always have. The
-// two NBR views (standalone and inside "Compare all") now show it in its true
-// −1…1 range on a diverging ramp instead of a per-tile greyscale stretch:
-// same quantity, but a colour that means the same thing on every tile, which
-// is the point of the whole exercise. "Canopy moisture" is new. The
-// multi-panel grid renders panels[0] for consumers (like the review page)
-// that only care about one composite.
+// keys). The two NBR views (standalone and inside "Compare all") show it in
+// its true −1…1 range on a diverging ramp instead of a per-tile greyscale
+// stretch: same quantity, but a colour that means the same thing on every
+// tile, which is the point of the whole exercise. The multi-panel grid
+// renders panels[0] for consumers (like the review page) that only care
+// about one composite.
 export const BUILTIN_PRESETS: ChannelPreset[] = [
   {
     id: "true",
@@ -111,7 +126,7 @@ export const BUILTIN_PRESETS: ChannelPreset[] = [
         label: "True colour (R·G·B)",
         mode: "rgb",
         expressions: ["R", "G", "B"],
-        stretch: "shared",
+        ...TRUE_COLOUR_DISPLAY,
       },
     ],
   },
@@ -125,7 +140,7 @@ export const BUILTIN_PRESETS: ChannelPreset[] = [
         label: "Colour infrared (nIR·R·G)",
         mode: "rgb",
         expressions: ["nIR", "R", "G"],
-        stretch: "shared",
+        ...FALSE_COLOUR_DISPLAY,
       },
     ],
   },
@@ -139,7 +154,7 @@ export const BUILTIN_PRESETS: ChannelPreset[] = [
         label: "SWIR (swIR2·nIR·G)",
         mode: "rgb",
         expressions: ["swIR2", "nIR", "G"],
-        stretch: "shared",
+        ...FALSE_COLOUR_DISPLAY,
       },
     ],
   },
@@ -185,21 +200,21 @@ export const BUILTIN_PRESETS: ChannelPreset[] = [
         label: "True colour",
         mode: "rgb",
         expressions: ["R", "G", "B"],
-        stretch: "shared",
+        ...TRUE_COLOUR_DISPLAY,
       },
       {
         id: "compare-1",
         label: "Colour infrared",
         mode: "rgb",
         expressions: ["nIR", "R", "G"],
-        stretch: "shared",
+        ...FALSE_COLOUR_DISPLAY,
       },
       {
         id: "compare-2",
         label: "SWIR",
         mode: "rgb",
         expressions: ["swIR2", "nIR", "G"],
-        stretch: "shared",
+        ...FALSE_COLOUR_DISPLAY,
       },
       {
         id: "compare-3",

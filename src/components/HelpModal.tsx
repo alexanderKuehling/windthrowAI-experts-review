@@ -186,16 +186,17 @@ export function HelpModal({ section, onClose, onOpenChannels }: HelpModalProps) 
             </p>
             <ul>
               <li>
-                <strong>True colour</strong>: roughly what the eye would see. Fallen trees show as
-                lighter, brownish patches in the dark green canopy.
+                <strong>True colour</strong>: roughly what the eye would see, on the same
+                brightness scale on every tile. Fallen trees show as lighter, brownish patches in
+                the green canopy.
               </li>
               <li>
-                <strong>Colour infrared</strong>: healthy canopy glows red. Damaged or fallen
-                trees look duller, which makes the edge of a scar easier to trace.
+                <strong>Colour infrared</strong>: healthy canopy glows red. Opened canopy, bare
+                soil and debris turn cyan to grey, which makes the edge of a scar easier to trace.
               </li>
               <li>
                 <strong>SWIR</strong>: intact forest is green; bare wood, soil and dry debris
-                stand out in pink to brown tones.
+                stand out in pink to magenta.
               </li>
               <li>
                 <strong>NBR</strong>: a single index on a red → green ramp. Green is intact
@@ -237,9 +238,9 @@ export function HelpModal({ section, onClose, onOpenChannels }: HelpModalProps) 
               then paint over the imagery: every stroke turns that area red.
             </p>
             <p>
-              Solid <strong>black</strong> areas are not part of the mask — they're no-data or
-              cloud cover baked into the tile itself, not something you can paint over or need to
-              account for. Only the red overlay reflects what gets submitted.
+              <strong>Striped</strong> areas are not part of the mask — they're no-data (cloud,
+              cloud shadow or a gap between satellite scenes) baked into the tile itself, with no
+              imagery to judge. Only the red overlay reflects what gets submitted.
             </p>
             <BeforeAfter
               before={ctx => drawTile(ctx, demo, demo.mask, 0.45)}

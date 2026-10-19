@@ -42,6 +42,11 @@ export function Colorbar({ panel, stats, compact }: ColorbarProps) {
             brightness means a different reflectance on the next tile.
           </p>
         )}
+        {!compact && domain.kind === "fixed" && (
+          <p className="colorbar-note">
+            Fixed range — the same reflectance looks the same on every tile.
+          </p>
+        )}
         <NoDataNote stats={stats} />
       </div>
     )
