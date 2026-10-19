@@ -1252,9 +1252,19 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
               ))}
             </select>
           )}
-          <button className="tab-btn" onClick={onOpenChannels}>
+          <button
+            className="tab-btn"
+            onClick={onOpenChannels}
+            title="Build your own band combination in the Channels tab; it then shows up here under Custom"
+          >
             🎨 Customize…
           </button>
+          {/* Hint until the reviewer has made a combination of their own */}
+          {customPresets.length === 0 && (
+            <span className="review-coverage">
+              None of these fit? Pick your own bands with Customize.
+            </span>
+          )}
           <button
             className="help-btn"
             onClick={() => openHelp("bands")}
