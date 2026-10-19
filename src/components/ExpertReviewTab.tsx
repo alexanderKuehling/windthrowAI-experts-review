@@ -32,6 +32,8 @@ type Status = "loading" | "ready" | "submitting"
 type PickTier = 1 | 2 | 3 | 4
 
 const DEFAULT_OVERLAY_ALPHA = 0.45
+// Below this the red mask is too faint to see, so painting gets a hint.
+const MIN_VISIBLE_ALPHA = 0.1
 // %, 0 = show every positive tile (no filter). Only for an index from before
 // amazon-scan's export rule; one written with it is already filtered to tiles
 // with a windthrow-sized patch, so the filter then starts at 0 — 1% of a tile
@@ -106,6 +108,7 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
   const [tool, setTool] = useState<Tool>("add")
   const [brush, setBrush] = useState(4)
   const [overlayAlpha, setOverlayAlpha] = useState(DEFAULT_OVERLAY_ALPHA)
+  const [paintedUnseen, setPaintedUnseen] = useState(false) // painted while the mask was too faint to see
   const [minCoverage, setMinCoverage] = useState(DEFAULT_MIN_COVERAGE)
   const [coverageIndex, setCoverageIndex] = useState<CoverageIndex>({})
   const [notice, setNotice] = useState<string | null>(null)
@@ -628,6 +631,12 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
     redraw()
   }
 
+  // Set the mask opacity; once it's visible again the faint-mask hint goes.
+  function showMask(alpha: number) {
+    setOverlayAlpha(alpha)
+    if (alpha >= MIN_VISIBLE_ALPHA) setPaintedUnseen(false)
+  }
+
   function handlePointerDown(e: React.PointerEvent<HTMLCanvasElement>) {
     if (e.button === 1 || (e.button === 0 && spaceHeld)) {
       // Middle button, or Space + drag: move the view instead of painting.
@@ -640,6 +649,7 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
     if (e.button !== 0 || status !== "ready" || !maskRef.current) return
     e.currentTarget.setPointerCapture(e.pointerId)
     paintingRef.current = true
+    if (overlayAlpha < MIN_VISIBLE_ALPHA) setPaintedUnseen(true)
     strokeStartRef.current = Uint8Array.from(maskRef.current)
     paintAt(e.currentTarget, e.clientX, e.clientY)
   }
@@ -973,6 +983,14 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
       </section>
 
       {notice && <div className="review-notice">{notice}</div>}
+      {paintedUnseen && (
+        <div className="review-notice review-notice-row" role="status">
+          <span>Mask opacity is {Math.round(overlayAlpha * 100)}%, so you can't see what you paint.</span>
+          <button className="tab-btn" onClick={() => showMask(DEFAULT_OVERLAY_ALPHA)}>
+            Show mask
+          </button>
+        </div>
+      )}
 
       {/* Canvas(es), centred and alone — one per layer in the active preset */}
       <div className="review-stage">
@@ -1169,7 +1187,7 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
             max={100}
             value={Math.round(overlayAlpha * 100)}
             aria-label="Mask opacity"
-            onChange={e => setOverlayAlpha(Number(e.target.value) / 100)}
+            onChange={e => showMask(Number(e.target.value) / 100)}
           />
           <span className="review-coverage">Marked: {coverage.toFixed(1)}% of tile</span>
         </div>

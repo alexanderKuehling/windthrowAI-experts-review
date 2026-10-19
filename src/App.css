@@ -651,6 +651,14 @@
   font-size: 13px;
 }
 
+.review-notice-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 /* Canvas, centred and alone */
 /* The canvas area asks for the width its plots need (flex-basis, set from the
    size slider); the probe readout sits beside it while there's room and
