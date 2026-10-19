@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef } from "react"
 import { BUILTIN_PRESETS, renderPreset } from "../utils/channels"
 import { makeDemoPatch } from "../utils/demoPatch"
 import type { DemoPatch } from "../utils/demoPatch"
+import { REDO_KEYS, UNDO_KEYS, ZOOM_MOD } from "../utils/keys"
 
 export type HelpSection =
   | "overview"
@@ -10,6 +11,7 @@ export type HelpSection =
   | "add"
   | "remove"
   | "brush"
+  | "zoom"
   | "undo"
   | "decision"
   | "spotcheck"
@@ -290,8 +292,26 @@ export function HelpModal({ section, onClose, onOpenChannels }: HelpModalProps) 
             />
           </section>
 
+          <section ref={registerSection} data-section="zoom">
+            <h3>Zoom</h3>
+            <p>
+              Pinch on the trackpad, or hold {ZOOM_MOD} and scroll, to zoom in where the pointer
+              is; the − and + buttons under the tile (or the − and + keys) zoom in steps. Once
+              zoomed in, scroll or hold Space and drag to move around, and "Whole tile" (or 0)
+              zooms back out. Every layer zooms together, and painting works the same at any zoom,
+              so zoom in with a 1 px brush for exact edges. The size slider next to the zoom
+              buttons sets how big each plot is drawn; it's remembered separately for one layer
+              and for several side by side.
+            </p>
+          </section>
+
           <section ref={registerSection} data-section="undo">
-            <h3>Undo all edits</h3>
+            <h3>Undo</h3>
+            <p>
+              <strong>↶ Undo</strong> ({UNDO_KEYS}) takes back your last stroke, and{" "}
+              <strong>↷ Redo</strong> ({REDO_KEYS}) puts it back. <strong>↩️ Undo all edits</strong>{" "}
+              returns to the model's proposal in one go, and can itself be undone.
+            </p>
             <BeforeAfter
               before={ctx => {
                 const edited = Uint8Array.from(demo.mask)

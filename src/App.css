@@ -652,8 +652,12 @@
 }
 
 /* Canvas, centred and alone */
+/* The canvas area asks for the width its plots need (flex-basis, set from the
+   size slider); the probe readout sits beside it while there's room and
+   wraps below once the plots are wider. */
 .review-stage {
   display: flex;
+  flex-wrap: wrap;
   align-items: stretch;
   gap: 16px;
   justify-content: center;
@@ -661,25 +665,68 @@
 
 .review-canvas-area {
   position: relative;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
 }
 
-/* One grid cell per layer in the active preset — a single-layer preset is
-   just a one-cell grid, capped so it doesn't balloon on a wide screen. */
-.review-canvas-grid {
-  max-width: 900px;
-  margin: 0 auto;
+/* One grid cell per layer in the active preset, each --panel-size wide (the
+   size slider), wrapping onto more rows when they don't fit side by side and
+   never wider than the area itself. Doubled class to beat .channels-panel-grid. */
+.channels-panel-grid.review-canvas-grid {
+  grid-template-columns: repeat(auto-fit, min(var(--panel-size), 100%));
+  justify-content: center;
+}
+
+.review-size-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 8px;
+}
+
+/* Clips the canvas when zoomed in; the zoom itself is a transform on the canvas. */
+.review-viewport {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  overflow: hidden;
+  border: 1px solid var(--border-mid);
+  border-radius: var(--radius);
 }
 
 .review-canvas {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
+  transform-origin: 0 0;
   image-rendering: pixelated;
   touch-action: none;
 }
 
 .review-tool-add    { cursor: crosshair; }
 .review-tool-remove { cursor: cell; }
+.review-pannable    { cursor: grab; }
+.review-panning     { cursor: grabbing; }
+
+.review-zoom-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 6px 8px;
+  margin-top: 10px;
+}
+
+.review-zoom-level {
+  min-width: 88px;
+  font-variant-numeric: tabular-nums;
+}
+
+.review-zoom-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+}
 
 .review-canvas-loading {
   position: absolute;
@@ -1272,7 +1319,7 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  width: 100%;
+  flex: 1 1 280px;
   max-width: 520px;
   margin: 10px auto 0;
 }

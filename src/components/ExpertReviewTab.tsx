@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import {
   BAND_LABELS,
   countChangedPixels,
@@ -15,6 +15,9 @@ import type { CoverageIndex, ReviewPatch, ReviewSummary, TileMetaIndex, Verdict 
 import { allPresets, BUILTIN_PRESETS, formatValue, probePanel, renderPanel } from "../utils/channels"
 import type { ChannelPanel, ChannelPreset, PanelStats, PixelProbe } from "../utils/channels"
 import { bboxCenter, formatAcquisition, formatLatLon, mapsUrl } from "../utils/geo"
+import { FIT_VIEW, MAX_ZOOM, panBy, viewTransform, zoomAt } from "../utils/zoom"
+import type { ZoomView } from "../utils/zoom"
+import { isTextEntry, REDO_KEYS, UNDO_KEYS, ZOOM_MOD } from "../utils/keys"
 import { IMAGERY } from "../constants"
 import { useAppState } from "../state/appStateContext"
 import { Colorbar } from "./Colorbar"
@@ -46,6 +49,32 @@ const LOW_CONF_PROBABILITY = 0.5
 // scanning empty forest. Uniform within the spot-check pool on purpose: a
 // random sample is what makes the measured miss rate an honest estimate.
 const CONTROL_PICK_PROBABILITY = 0.1
+// Strokes kept for ⌘Z / Ctrl+Z per tile. A 256×256 mask is 64 KB, so this
+// caps the history at a few MB.
+const MAX_UNDO = 50
+const ZOOM_STEP = 2 // per click on − / +, or per key press
+// Display width of each tile plot, chosen separately per number of layers
+// shown (one big True Color tile and three side-by-side layers want different
+// sizes) and remembered in this browser.
+const PANEL_SIZE_KEY = "windthrowai.panelSize.v1"
+const MIN_PANEL_SIZE = 160
+const MAX_PANEL_SIZE = 1100 // about the page's content width; wider gets capped to fit anyway
+const PANEL_GAP = 12        // matches .channels-panel-grid's gap
+
+// Roughly the sizes the plots had before the slider existed, next to the
+// probe readout: one tile ~520 px, several layers ~250 px each.
+function defaultPanelSize(count: number): number {
+  return count > 1 ? 250 : 520
+}
+
+function loadPanelSizes(): Record<number, number> {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(PANEL_SIZE_KEY) ?? "{}")
+    return parsed && typeof parsed === "object" ? (parsed as Record<number, number>) : {}
+  } catch {
+    return {} // storage blocked or garbled — defaults
+  }
+}
 
 function pickTierLabel(tier: PickTier | null, isControl: boolean): string | null {
   if (isControl) return "spot check"
@@ -89,8 +118,20 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
   const [reviewSummary, setReviewSummary] = useState<ReviewSummary>({})
   const [pickTier, setPickTier] = useState<PickTier | null>(null) // why the current tile was picked (F8)
   const [controlTiles, setControlTiles] = useState<string[]>([]) // spot-check pool (see TileKind)
+  const [history, setHistory] = useState({ undo: 0, redo: 0 }) // undo/redo depths, for the buttons
+  const [view, setView] = useState<ZoomView>(FIT_VIEW) // zoom + pan, shared by every panel
+  const [spaceHeld, setSpaceHeld] = useState(false)    // Space + drag moves the view
+  const [panning, setPanning] = useState(false)
 
   const canvasRefs = useRef<Map<string, HTMLCanvasElement>>(new Map()) // one canvas per panel
+  const gridRef = useRef<HTMLDivElement>(null)         // the panels, for the native wheel listener
+  const undoRef = useRef<Uint8Array[]>([])             // masks as they were before each stroke
+  const redoRef = useRef<Uint8Array[]>([])
+  const strokeStartRef = useRef<Uint8Array | null>(null) // mask before the stroke in progress
+  const viewRef = useRef(view)                         // current even between renders (see applyView)
+  const panRef = useRef<{ x: number; y: number } | null>(null) // last pointer position while dragging the view
+  const hoverRef = useRef(false)                       // pointer over a canvas, so Space pans instead of scrolling
+  const keyHandlerRef = useRef<(e: KeyboardEvent) => void>(() => {})
   const nextTileRef = useRef<string | null>(null) // tile prefetched for the next Submit/Skip
   const nextTierRef = useRef<PickTier | null>(null) // that prefetched tile's pick tier
   const bgMapRef = useRef<Map<string, Uint8ClampedArray>>(new Map()) // background RGBA per panel, w*h*4
@@ -104,14 +145,18 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
   const tileMetaRef = useRef(tileMeta)
   const reviewSummaryRef = useRef(reviewSummary)
   const controlTilesRef = useRef(controlTiles)
-  toolRef.current = tool
-  brushRef.current = brush
-  overlayAlphaRef.current = overlayAlpha
-  minCoverageRef.current = minCoverage
-  coverageIndexRef.current = coverageIndex
-  tileMetaRef.current = tileMeta
-  reviewSummaryRef.current = reviewSummary
-  controlTilesRef.current = controlTiles
+  // Mirror state into the refs the event handlers read. Done after each
+  // commit, not during render, which React's rules (and its lint) forbid.
+  useLayoutEffect(() => {
+    toolRef.current = tool
+    brushRef.current = brush
+    overlayAlphaRef.current = overlayAlpha
+    minCoverageRef.current = minCoverage
+    coverageIndexRef.current = coverageIndex
+    tileMetaRef.current = tileMeta
+    reviewSummaryRef.current = reviewSummary
+    controlTilesRef.current = controlTiles
+  })
 
   const allPresetsList = useMemo(() => allPresets(customPresets), [customPresets])
 
@@ -119,6 +164,26 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
   // page, fall back to the first built-in rather than leaving a dangling id.
   // Computed during render (not an effect) so there's no extra render pass.
   const activePreset = allPresetsList.some(p => p.id === preset.id) ? preset : BUILTIN_PRESETS[0]
+
+  // ── Plot size ─────────────────────────────────────────────────────────────
+  const [panelSizes, setPanelSizes] = useState<Record<number, number>>(loadPanelSizes)
+  const panelCount = activePreset.panels.length
+  const savedPanelSize = Number(panelSizes[panelCount])
+  const panelSize = Number.isFinite(savedPanelSize)
+    ? Math.min(MAX_PANEL_SIZE, Math.max(MIN_PANEL_SIZE, savedPanelSize))
+    : defaultPanelSize(panelCount)
+  // Room for every layer in one row; the grid wraps them when the page is narrower.
+  const panelRowWidth = panelCount * panelSize + (panelCount - 1) * PANEL_GAP
+
+  function changePanelSize(px: number) {
+    const next = { ...panelSizes, [panelCount]: px }
+    setPanelSizes(next)
+    try {
+      localStorage.setItem(PANEL_SIZE_KEY, JSON.stringify(next))
+    } catch {
+      // degrade silently — the size just isn't remembered
+    }
+  }
 
   // ── Help modal: auto-open once per browser, fail closed on storage errors ──
   // Lazy initializer runs exactly once at mount, so no effect + extra render is needed.
@@ -141,42 +206,6 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
       // degrade silently
     }
   }
-
-  // ── Load the tile index (+ coverage + review summary) once ────────────────
-  useEffect(() => {
-    // fetchReviewSummary() never rejects (it swallows its own errors and
-    // resolves to {}), so a summary outage can't fail this Promise.all — the
-    // tiered picker below just sees every tile as unreviewed, i.e. today's
-    // uniform-random behaviour.
-    Promise.all([fetchTileIndex(), fetchReviewSummary()])
-      .then(async ([{ tiles: list, controlTiles: controls, meta, coverage, scanId: id, exportRule }, summary]) => {
-        if (list.length === 0) throw new Error("No positive tiles available to review.")
-        // Prefer coverage from inputs_index.csv (written by the data pipeline).
-        // Until the next scan re-exports it, fall back to the shipped static
-        // coverage_index.json so the filter still works today.
-        const index =
-          Object.keys(coverage).length > 0 ? coverage : await fetchCoverageIndex()
-        setTiles(list)
-        setTileMeta(meta)
-        setCoverageIndex(index)
-        setScanId(id)
-        setReviewSummary(summary)
-        setControlTiles(controls)
-        if (exportRule) setMinCoverage(0)
-        // refs lag a render; loadRandom needs today's values right now
-        if (exportRule) minCoverageRef.current = 0
-        coverageIndexRef.current = index
-        tileMetaRef.current = meta
-        reviewSummaryRef.current = summary
-        controlTilesRef.current = controls
-        void loadRandom(list)
-      })
-      .catch(e => {
-        setError(e instanceof Error ? e.message : String(e))
-        setStatus("ready")
-      })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
 
   const computeCoverage = useCallback((mask: Uint8Array) => {
     setCoverage(maskCoverage(mask))
@@ -308,6 +337,8 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
     try {
       const p = await loadPatch(next, tileMetaRef.current[next])
       maskRef.current = Uint8Array.from(p.mask)
+      clearHistory()
+      applyView(FIT_VIEW)
       setPatch(p)
       setSharedPatch(p)
       setCoverage(maskCoverage(p.mask))
@@ -317,6 +348,73 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
       setStatus("ready")
+    }
+  }
+
+  // ── Load the tile index (+ coverage + review summary) once ────────────────
+  useEffect(() => {
+    // fetchReviewSummary() never rejects (it swallows its own errors and
+    // resolves to {}), so a summary outage can't fail this Promise.all — the
+    // tiered picker below just sees every tile as unreviewed, i.e. today's
+    // uniform-random behaviour.
+    Promise.all([fetchTileIndex(), fetchReviewSummary()])
+      .then(async ([{ tiles: list, controlTiles: controls, meta, coverage, scanId: id, exportRule }, summary]) => {
+        if (list.length === 0) throw new Error("No positive tiles available to review.")
+        // Prefer coverage from inputs_index.csv (written by the data pipeline).
+        // Until the next scan re-exports it, fall back to the shipped static
+        // coverage_index.json so the filter still works today.
+        const index =
+          Object.keys(coverage).length > 0 ? coverage : await fetchCoverageIndex()
+        setTiles(list)
+        setTileMeta(meta)
+        setCoverageIndex(index)
+        setScanId(id)
+        setReviewSummary(summary)
+        setControlTiles(controls)
+        if (exportRule) setMinCoverage(0)
+        // refs lag a render; loadRandom needs today's values right now
+        if (exportRule) minCoverageRef.current = 0
+        coverageIndexRef.current = index
+        tileMetaRef.current = meta
+        reviewSummaryRef.current = summary
+        controlTilesRef.current = controls
+        void loadRandom(list)
+      })
+      .catch(e => {
+        setError(e instanceof Error ? e.message : String(e))
+        setStatus("ready")
+      })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  function redraw() {
+    const mask = maskRef.current
+    if (!mask || !patch) return
+    const { width: w, height: h } = patch
+    const a = overlayAlphaRef.current
+    for (const panel of activePreset.panels) {
+      const canvas = canvasRefs.current.get(panel.id)
+      const bg = bgMapRef.current.get(panel.id)
+      if (!canvas || !bg) continue
+      const ctx = canvas.getContext("2d")!
+      const img = ctx.createImageData(w, h)
+      const d = img.data
+      for (let i = 0; i < w * h; i++) {
+        const o = i * 4
+        if (mask[i]) {
+          d[o] = bg[o] * (1 - a) + 255 * a
+          d[o + 1] = bg[o + 1] * (1 - a)
+          d[o + 2] = bg[o + 2] * (1 - a)
+          d[o + 3] = 255 // the mask stays visible even over a no-data pixel
+        } else {
+          d[o] = bg[o]
+          d[o + 1] = bg[o + 1]
+          d[o + 2] = bg[o + 2]
+          d[o + 3] = bg[o + 3] // 0 where the formula had no data — let the hatch show
+        }
+      }
+      ctx.clearRect(0, 0, w, h)
+      ctx.putImageData(img, 0, 0)
     }
   }
 
@@ -378,36 +476,130 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
   const lowMatchNote =
     matchCount !== null && minCoverage <= 1 && matchCount < totalCount * 0.5
 
-  function redraw() {
-    const mask = maskRef.current
-    if (!mask || !patch) return
-    const { width: w, height: h } = patch
-    const a = overlayAlphaRef.current
-    for (const panel of activePreset.panels) {
-      const canvas = canvasRefs.current.get(panel.id)
-      const bg = bgMapRef.current.get(panel.id)
-      if (!canvas || !bg) continue
-      const ctx = canvas.getContext("2d")!
-      const img = ctx.createImageData(w, h)
-      const d = img.data
-      for (let i = 0; i < w * h; i++) {
-        const o = i * 4
-        if (mask[i]) {
-          d[o] = bg[o] * (1 - a) + 255 * a
-          d[o + 1] = bg[o + 1] * (1 - a)
-          d[o + 2] = bg[o + 2] * (1 - a)
-          d[o + 3] = 255 // the mask stays visible even over a no-data pixel
-        } else {
-          d[o] = bg[o]
-          d[o + 1] = bg[o + 1]
-          d[o + 2] = bg[o + 2]
-          d[o + 3] = bg[o + 3] // 0 where the formula had no data — let the hatch show
-        }
+  // ── Zoom ──────────────────────────────────────────────────────────────────
+  // Wheel and pinch events can arrive several per frame, so each one builds on
+  // the ref rather than on the last render's `view`.
+  function applyView(next: ZoomView) {
+    viewRef.current = next
+    setView(next)
+  }
+
+  // Pinch, or ⌘/Ctrl + scroll, zooms around the cursor; plain scroll moves a
+  // zoomed-in view and otherwise scrolls the page as usual. Bound natively
+  // because React's wheel listener is passive and can't stop the page (or the
+  // browser's own pinch zoom) from moving along.
+  useEffect(() => {
+    const grid = gridRef.current
+    if (!grid) return
+    // Safari reports a trackpad pinch as gesture events rather than ctrl+wheel.
+    let gesture: { zoom: number; viewport: Element } | null = null
+    const viewportOf = (e: Event) => (e.target instanceof Element ? e.target.closest(".review-viewport") : null)
+    const anchor = (viewport: Element, clientX: number, clientY: number) => {
+      const r = viewport.getBoundingClientRect()
+      return [(clientX - r.left) / r.width, (clientY - r.top) / r.height] as const
+    }
+
+    function onWheel(e: WheelEvent) {
+      const viewport = viewportOf(e)
+      if (!viewport) return
+      const v = viewRef.current
+      const zooming = e.ctrlKey || e.metaKey
+      if (!zooming && v.zoom === 1) return
+      e.preventDefault()
+      if (gesture) return
+      const rect = viewport.getBoundingClientRect()
+      const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? rect.height : 1 // lines / pages → px
+      if (zooming) {
+        // Clamped so one mouse-wheel notch is a ~1.6× step while a pinch,
+        // which sends many small deltas, stays smooth.
+        const dy = Math.max(-50, Math.min(50, e.deltaY * unit))
+        applyView(zoomAt(v, Math.exp(-dy * 0.01), ...anchor(viewport, e.clientX, e.clientY)))
+      } else {
+        applyView(panBy(v, (e.deltaX * unit) / rect.width, (e.deltaY * unit) / rect.height))
       }
-      ctx.clearRect(0, 0, w, h)
-      ctx.putImageData(img, 0, 0)
+    }
+    function onGestureStart(e: Event) {
+      const viewport = viewportOf(e)
+      if (!viewport) return
+      e.preventDefault()
+      gesture = { zoom: viewRef.current.zoom, viewport }
+    }
+    function onGestureChange(e: Event) {
+      if (!gesture) return
+      e.preventDefault()
+      const g = e as Event & { scale: number; clientX: number; clientY: number }
+      const v = viewRef.current
+      applyView(zoomAt(v, (gesture.zoom * g.scale) / v.zoom, ...anchor(gesture.viewport, g.clientX, g.clientY)))
+    }
+    function onGestureEnd(e: Event) {
+      if (!gesture) return
+      e.preventDefault()
+      gesture = null
+    }
+
+    grid.addEventListener("wheel", onWheel, { passive: false })
+    grid.addEventListener("gesturestart", onGestureStart)
+    grid.addEventListener("gesturechange", onGestureChange)
+    grid.addEventListener("gestureend", onGestureEnd)
+    return () => {
+      grid.removeEventListener("wheel", onWheel)
+      grid.removeEventListener("gesturestart", onGestureStart)
+      grid.removeEventListener("gesturechange", onGestureChange)
+      grid.removeEventListener("gestureend", onGestureEnd)
+    }
+  }, [])
+
+  // ── Keyboard ──────────────────────────────────────────────────────────────
+  // ⌘Z / Ctrl+Z undoes a stroke, ⇧⌘Z / Ctrl+Shift+Z / Ctrl+Y redoes it,
+  // + − 0 zoom, and Space held over a tile turns a drag into moving the view.
+  // The window listener is bound once and calls whatever handler the latest
+  // render left in the ref, so it always sees the current tile and state.
+  function handleKey(e: KeyboardEvent) {
+    if (e.type === "keyup") {
+      if (e.code === "Space" && spaceHeld) {
+        e.preventDefault()
+        setSpaceHeld(false)
+      }
+      return
+    }
+    if (helpSection || isTextEntry(e.target)) return
+    const key = e.key.toLowerCase()
+    if (e.metaKey || e.ctrlKey) {
+      if (key === "z") {
+        e.preventDefault()
+        if (e.shiftKey) redo()
+        else undo()
+      } else if (key === "y" && e.ctrlKey) {
+        e.preventDefault()
+        redo()
+      }
+      return
+    }
+    if (e.altKey) return
+    if (e.key === "+" || e.key === "=") applyView(zoomAt(viewRef.current, ZOOM_STEP))
+    else if (e.key === "-") applyView(zoomAt(viewRef.current, 1 / ZOOM_STEP))
+    else if (e.key === "0") applyView(FIT_VIEW)
+    else if (e.code === "Space" && hoverRef.current) {
+      e.preventDefault() // no page scroll, and no click on a still-focused button
+      if (!spaceHeld) setSpaceHeld(true)
     }
   }
+  useLayoutEffect(() => {
+    keyHandlerRef.current = handleKey
+  })
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => keyHandlerRef.current(e)
+    const onBlur = () => setSpaceHeld(false) // a keyup we'll never see
+    window.addEventListener("keydown", onKey)
+    window.addEventListener("keyup", onKey)
+    window.addEventListener("blur", onBlur)
+    return () => {
+      window.removeEventListener("keydown", onKey)
+      window.removeEventListener("keyup", onKey)
+      window.removeEventListener("blur", onBlur)
+    }
+  }, [])
 
   // ── Painting ──────────────────────────────────────────────────────────────
   // A stroke is anchored to whichever panel's canvas the pointer went down on
@@ -437,14 +629,38 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
   }
 
   function handlePointerDown(e: React.PointerEvent<HTMLCanvasElement>) {
-    if (status !== "ready") return
+    if (e.button === 1 || (e.button === 0 && spaceHeld)) {
+      // Middle button, or Space + drag: move the view instead of painting.
+      e.preventDefault()
+      e.currentTarget.setPointerCapture(e.pointerId)
+      panRef.current = { x: e.clientX, y: e.clientY }
+      setPanning(true)
+      return
+    }
+    if (e.button !== 0 || status !== "ready" || !maskRef.current) return
     e.currentTarget.setPointerCapture(e.pointerId)
     paintingRef.current = true
+    strokeStartRef.current = Uint8Array.from(maskRef.current)
     paintAt(e.currentTarget, e.clientX, e.clientY)
   }
   function handlePointerMove(e: React.PointerEvent<HTMLCanvasElement>, panel: ChannelPanel) {
+    const last = panRef.current
+    if (last) {
+      const viewport = e.currentTarget.parentElement!.getBoundingClientRect()
+      panRef.current = { x: e.clientX, y: e.clientY }
+      applyView(panBy(viewRef.current, (last.x - e.clientX) / viewport.width, (last.y - e.clientY) / viewport.height))
+      return
+    }
     if (paintingRef.current) paintAt(e.currentTarget, e.clientX, e.clientY)
     updateProbe(e.currentTarget, panel, e.clientX, e.clientY)
+  }
+  function endPointer() {
+    if (panRef.current) {
+      panRef.current = null
+      setPanning(false)
+      return
+    }
+    endPaint()
   }
 
   // ── Pixel probe ───────────────────────────────────────────────────────────
@@ -467,14 +683,60 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
   function endPaint() {
     if (!paintingRef.current) return
     paintingRef.current = false
+    const before = strokeStartRef.current
+    strokeStartRef.current = null
     if (maskRef.current) {
+      // A stroke that changed nothing (erasing where there was no mask)
+      // isn't worth an undo step.
+      if (before && countChangedPixels(before, maskRef.current) > 0) pushUndo(before)
       computeCoverage(maskRef.current)
       setChangedPixels(changedVsProposed(maskRef.current))
     }
   }
 
+  // ── Undo / redo ───────────────────────────────────────────────────────────
+  // Whole-mask snapshots, one per stroke, kept per tile.
+  function syncHistory() {
+    setHistory({ undo: undoRef.current.length, redo: redoRef.current.length })
+  }
+  function clearHistory() {
+    undoRef.current = []
+    redoRef.current = []
+    syncHistory()
+  }
+  // Record `before` as one step (a finished stroke, or a reset) and drop the
+  // redo branch, as any new edit does.
+  function pushUndo(before: Uint8Array) {
+    undoRef.current.push(before)
+    if (undoRef.current.length > MAX_UNDO) undoRef.current.shift()
+    redoRef.current = []
+    syncHistory()
+  }
+  function stepHistory(from: Uint8Array[], to: Uint8Array[]) {
+    if (!patch || !maskRef.current || busy || paintingRef.current) return
+    const mask = from.pop()
+    if (!mask) return
+    to.push(maskRef.current)
+    maskRef.current = mask
+    // Back at exactly the model's mask counts as unedited again, so the
+    // submit button returns to "Confirm mask".
+    const changed = countChangedPixels(patch.mask, mask)
+    setDirty(changed > 0)
+    setChangedPixels(changed)
+    computeCoverage(mask)
+    syncHistory()
+    redraw()
+  }
+  function undo() {
+    stepHistory(undoRef.current, redoRef.current)
+  }
+  function redo() {
+    stepHistory(redoRef.current, undoRef.current)
+  }
+
   function handleReset() {
     if (!patch) return
+    if (maskRef.current) pushUndo(maskRef.current) // so ⌘Z / Ctrl+Z brings the edits back
     maskRef.current = Uint8Array.from(patch.mask)
     setDirty(false)
     setChangedPixels(0)
@@ -714,33 +976,50 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
 
       {/* Canvas(es), centred and alone — one per layer in the active preset */}
       <div className="review-stage">
-        <div className="review-canvas-area">
+        <div className="review-canvas-area" style={{ flexBasis: `${panelRowWidth}px` }}>
           {status === "loading" && (
             <div className="review-canvas-loading">
               <div className="spinner" />
               <p>Loading tile… the first one can take a few seconds</p>
             </div>
           )}
-          <div className="channels-panel-grid review-canvas-grid">
+          <div
+            className="channels-panel-grid review-canvas-grid"
+            ref={gridRef}
+            style={{ "--panel-size": `${panelSize}px` } as React.CSSProperties}
+          >
             {activePreset.panels.map(panel => (
               <div className="channels-panel review-panel" key={panel.id}>
-                <canvas
-                  ref={el => {
-                    if (el) canvasRefs.current.set(panel.id, el)
-                    else canvasRefs.current.delete(panel.id)
-                  }}
-                  width={patch?.width ?? 256}
-                  height={patch?.height ?? 256}
-                  className={`channels-canvas review-canvas review-tool-${tool}`}
-                  style={{ visibility: status === "loading" ? "hidden" : "visible" }}
-                  onPointerDown={handlePointerDown}
-                  onPointerMove={e => handlePointerMove(e, panel)}
-                  onPointerUp={endPaint}
-                  onPointerLeave={() => {
-                    endPaint()
-                    setProbe(null)
-                  }}
-                />
+                <div className="review-viewport">
+                  <canvas
+                    ref={el => {
+                      if (el) canvasRefs.current.set(panel.id, el)
+                      else canvasRefs.current.delete(panel.id)
+                    }}
+                    width={patch?.width ?? 256}
+                    height={patch?.height ?? 256}
+                    className={`review-canvas ${
+                      panning ? "review-panning" : spaceHeld ? "review-pannable" : `review-tool-${tool}`
+                    }`}
+                    style={{
+                      visibility: status === "loading" ? "hidden" : "visible",
+                      transform: viewTransform(view),
+                    }}
+                    onPointerDown={handlePointerDown}
+                    onPointerMove={e => handlePointerMove(e, panel)}
+                    onPointerUp={endPointer}
+                    onPointerCancel={endPointer}
+                    onPointerEnter={() => (hoverRef.current = true)}
+                    onPointerLeave={() => {
+                      hoverRef.current = false
+                      endPointer()
+                      setProbe(null)
+                    }}
+                    onMouseDown={e => {
+                      if (e.button === 1) e.preventDefault() // no autoscroll on a middle-button drag
+                    }}
+                  />
+                </div>
                 {activePreset.panels.length > 1 && (
                   <span className="channels-panel-label">{panel.label}</span>
                 )}
@@ -756,6 +1035,51 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
                 )}
               </div>
             ))}
+          </div>
+
+          <div className="review-zoom-bar" role="group" aria-label="Zoom and plot size">
+            <button
+              className="tab-btn"
+              onClick={() => applyView(zoomAt(view, 1 / ZOOM_STEP))}
+              disabled={view.zoom === 1}
+              aria-label="Zoom out"
+              title="Zoom out (−)"
+            >
+              −
+            </button>
+            <button
+              className="tab-btn review-zoom-level"
+              onClick={() => applyView(FIT_VIEW)}
+              disabled={view.zoom === 1}
+              title="Show the whole tile (0)"
+            >
+              {view.zoom === 1 ? "Whole tile" : `${Math.round(view.zoom * 10) / 10}×`}
+            </button>
+            <button
+              className="tab-btn"
+              onClick={() => applyView(zoomAt(view, ZOOM_STEP))}
+              disabled={view.zoom >= MAX_ZOOM}
+              aria-label="Zoom in"
+              title="Zoom in (+)"
+            >
+              +
+            </button>
+            <label className="review-size-control">
+              <span className="review-toolbar-label">
+                {panelCount > 1 ? "Size per layer" : "Tile size"} {panelSize} px
+              </span>
+              <input
+                type="range"
+                min={MIN_PANEL_SIZE}
+                max={MAX_PANEL_SIZE}
+                step={10}
+                value={panelSize}
+                onChange={e => changePanelSize(Number(e.target.value))}
+              />
+            </label>
+            <span className="review-zoom-hint">
+              Pinch or {ZOOM_MOD} + scroll to zoom · scroll or Space + drag to move
+            </span>
           </div>
         </div>
 
@@ -829,7 +1153,7 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
           <span className="review-toolbar-label">Brush {2 * brush + 1} px</span>
           <input
             type="range"
-            min={1}
+            min={0}
             max={20}
             value={brush}
             aria-label="Brush size"
@@ -856,6 +1180,22 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
               Your edits: {changedPixels.toLocaleString("en-US")} px
             </span>
           )}
+          <button
+            className="tab-btn"
+            onClick={undo}
+            disabled={history.undo === 0 || busy}
+            title={`Undo the last stroke (${UNDO_KEYS})`}
+          >
+            ↶ Undo
+          </button>
+          <button
+            className="tab-btn"
+            onClick={redo}
+            disabled={history.redo === 0 || busy}
+            title={`Redo (${REDO_KEYS})`}
+          >
+            ↷ Redo
+          </button>
           <button className="tab-btn" onClick={handleReset} disabled={!dirty || busy}>
             ↩️ Undo all edits
           </button>

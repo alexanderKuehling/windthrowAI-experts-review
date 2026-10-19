@@ -7,7 +7,10 @@ segmentation masks. Reviewers are shown a random positive Landsat patch with the
 model's proposed mask overlaid, and can:
 
 - switch band combinations (True Color, Vegetation/nIR, SWIR, NBR),
-- paint / erase the mask with an adjustable brush,
+- paint / erase the mask with an adjustable brush, undoing strokes with
+  ⌘Z / Ctrl+Z (redo: ⇧⌘Z / Ctrl+Y),
+- zoom in (pinch, ⌘/Ctrl + scroll, or the − / + buttons and keys) and move
+  around with scroll or Space + drag, and set how big each plot is drawn,
 - **Submit** the (optionally edited) mask,
 - mark **No windthrow** (false positive),
 - confirm with **No change needed** (mask is correct as-is),
