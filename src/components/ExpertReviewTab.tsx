@@ -1093,6 +1093,7 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
             >
               +
             </button>
+            ||
             <label className="review-size-control">
               <span className="review-toolbar-label">
                 {panelCount > 1 ? "Size per layer" : "Tile size"} {panelSize} px
