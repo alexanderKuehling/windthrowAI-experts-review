@@ -99,10 +99,6 @@ export interface TileIndex {
   meta: TileMetaIndex     // both kinds
   coverage: CoverageIndex // derived, flagged tiles only; empty when the CSV has no `coverage` column
   scanId?: string         // the export round's scan_id (column `scan_id`), same on every row
-  // The index was written with amazon-scan's export rule (it has `max_patch_px`):
-  // every flagged tile already carries a windthrow-sized patch, so the review
-  // tab drops its own coverage filter by default.
-  exportRule: boolean
 }
 
 // undefined when the column is absent, the cell is missing/empty, or not finite.
@@ -129,7 +125,7 @@ export async function fetchTileIndex(): Promise<TileIndex> {
   if (!res.ok) throw new Error(`Could not load tile index (${res.status}).`)
   const text = await res.text()
   const lines = text.trim().split(/\r?\n/)
-  if (lines.length < 2) return { tiles: [], controlTiles: [], meta: {}, coverage: {}, exportRule: false }
+  if (lines.length < 2) return { tiles: [], controlTiles: [], meta: {}, coverage: {} }
   const header = lines[0].split(",")
   const idCol = header.indexOf("tile_id")
   if (idCol === -1) throw new Error("inputs_index.csv is missing a tile_id column.")
@@ -185,7 +181,7 @@ export async function fetchTileIndex(): Promise<TileIndex> {
     tiles.push(id)
     if (m.coverage !== undefined) coverage[id] = m.coverage
   }
-  return { tiles, controlTiles, meta, coverage, scanId, exportRule: patchCol !== -1 }
+  return { tiles, controlTiles, meta, coverage, scanId }
 }
 
 // Load the precomputed coverage index. Returns {} (no filtering) if the asset

@@ -31,14 +31,13 @@ type Status = "loading" | "ready" | "submitting"
 // me, 4 = I already reviewed it (last resort, when nothing else qualifies).
 type PickTier = 1 | 2 | 3 | 4
 
-const DEFAULT_OVERLAY_ALPHA = 0.45
+const DEFAULT_OVERLAY_ALPHA = 0.3
 // Below this the red mask is too faint to see, so painting gets a hint.
 const MIN_VISIBLE_ALPHA = 0.1
-// %, 0 = show every positive tile (no filter). Only for an index from before
-// amazon-scan's export rule; one written with it is already filtered to tiles
-// with a windthrow-sized patch, so the filter then starts at 0 — 1% of a tile
-// is 59 ha, bigger than three quarters of real windthrows.
-const DEFAULT_MIN_COVERAGE = 1
+// Brush radius in mask pixels; the toolbar shows the diameter, 2r + 1 = 5 px.
+const DEFAULT_BRUSH_RADIUS = 2
+// %, 0 = show every positive tile (no filter). 1% of a tile is 59 ha.
+const DEFAULT_MIN_COVERAGE = 2
 const MAX_MIN_COVERAGE = 20    // slider ceiling (only a handful of tiles exceed this)
 const HELP_SEEN_KEY = "windthrowai.helpSeen.v1"
 // Inside tier 1, half the time narrow the pick to the tiles the classifier was
@@ -106,7 +105,7 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
   const [error, setError] = useState<string | null>(null)
   const [preset, setPreset] = useState<ChannelPreset>(BUILTIN_PRESETS[0])
   const [tool, setTool] = useState<Tool>("add")
-  const [brush, setBrush] = useState(4)
+  const [brush, setBrush] = useState(DEFAULT_BRUSH_RADIUS)
   const [overlayAlpha, setOverlayAlpha] = useState(DEFAULT_OVERLAY_ALPHA)
   const [paintedUnseen, setPaintedUnseen] = useState(false) // painted while the mask was too faint to see
   const [minCoverage, setMinCoverage] = useState(DEFAULT_MIN_COVERAGE)
@@ -361,7 +360,7 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
     // tiered picker below just sees every tile as unreviewed, i.e. today's
     // uniform-random behaviour.
     Promise.all([fetchTileIndex(), fetchReviewSummary()])
-      .then(async ([{ tiles: list, controlTiles: controls, meta, coverage, scanId: id, exportRule }, summary]) => {
+      .then(async ([{ tiles: list, controlTiles: controls, meta, coverage, scanId: id }, summary]) => {
         if (list.length === 0) throw new Error("No positive tiles available to review.")
         // Prefer coverage from inputs_index.csv (written by the data pipeline).
         // Until the next scan re-exports it, fall back to the shipped static
@@ -374,9 +373,7 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
         setScanId(id)
         setReviewSummary(summary)
         setControlTiles(controls)
-        if (exportRule) setMinCoverage(0)
         // refs lag a render; loadRandom needs today's values right now
-        if (exportRule) minCoverageRef.current = 0
         coverageIndexRef.current = index
         tileMetaRef.current = meta
         reviewSummaryRef.current = summary
