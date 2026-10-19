@@ -980,14 +980,6 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
       </section>
 
       {notice && <div className="review-notice">{notice}</div>}
-      {paintedUnseen && (
-        <div className="review-notice review-notice-row" role="status">
-          <span>Mask opacity is {Math.round(overlayAlpha * 100)}%, so you can't see what you paint.</span>
-          <button className="tab-btn" onClick={() => showMask(DEFAULT_OVERLAY_ALPHA)}>
-            Show mask
-          </button>
-        </div>
-      )}
 
       {/* Canvas(es), one per layer in the active preset, with their tools in one card */}
       <div className="review-stage">
@@ -1154,6 +1146,14 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
                 onChange={e => showMask(Number(e.target.value) / 100)}
               />
             </div>
+            {paintedUnseen && (
+              <div className="review-notice review-notice-row" role="status">
+                <span>Mask opacity is {Math.round(overlayAlpha * 100)}%, so you can't see what you paint.</span>
+                <button className="tab-btn" onClick={() => showMask(DEFAULT_OVERLAY_ALPHA)}>
+                  Show mask
+                </button>
+              </div>
+            )}
 
             <div className="review-toolbar-group">
               <span className="review-coverage">Marked: {coverage.toFixed(1)}% of tile</span>

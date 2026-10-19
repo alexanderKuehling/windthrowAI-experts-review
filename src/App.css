@@ -683,12 +683,25 @@
   max-width: 520px;
 }
 
+/* On a wide screen the side column stays beside the plots however many there
+   are (the grid narrows instead) and sticks under the 53 px header, so the
+   mask tools stay in reach while scrolling through a tall grid. */
+@media (min-width: 860px) {
+  .review-stage { flex-wrap: nowrap; }
+  .review-side {
+    flex: 1 0 320px;
+    position: sticky;
+    top: 68px;
+  }
+}
+
 .review-tools {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: 12px;
 }
+.review-tools .review-notice { align-self: stretch; }
 
 /* Label + slider on one row; the fixed label width keeps the sliders lined up. */
 .review-slider {
