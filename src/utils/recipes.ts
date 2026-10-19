@@ -41,7 +41,7 @@ const FULL_RANGE: Domain = { kind: "fixed", min: -1, max: 1 }
 // were derived against *top-of-atmosphere* reflectance. These tiles carry
 // surface reflectance, so treat the three TC recipes as visually indicative —
 // good for seeing structure, not for thresholding against published values.
-const TC_BRIGHTNESS =
+export const TC_BRIGHTNESS =
   "0.3029*B + 0.2786*G + 0.4733*R + 0.5599*nIR + 0.5080*swIR1 + 0.1872*swIR2"
 const TC_GREENNESS =
   "-0.2941*B - 0.2430*G - 0.5424*R + 0.7276*nIR + 0.0713*swIR1 - 0.1608*swIR2"

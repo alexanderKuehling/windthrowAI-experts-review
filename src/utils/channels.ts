@@ -2,7 +2,7 @@ import { BandMathError, compileExpression, evaluateExpression } from "./bandmath
 import type { CompiledExpr } from "./bandmath"
 import { colormapAt, colormapLut, isColormapId, isDiverging } from "./colormaps"
 import type { ColormapId } from "./colormaps"
-import { BUILTIN_RECIPES, parseRecipes } from "./recipes"
+import { parseRecipes, TC_BRIGHTNESS } from "./recipes"
 import type { Recipe } from "./recipes"
 import { PRESETS_API_URL } from "../constants"
 import { SessionExpiredError } from "./auth"
@@ -107,148 +107,116 @@ const TRUE_COLOUR_DISPLAY: Pick<ChannelPanel, "stretch" | "domain" | "gamma"> = 
   gamma: 1.4,
 }
 const FALSE_COLOUR_DISPLAY: Pick<ChannelPanel, "stretch"> = { stretch: "per-channel" }
-
-// An index panel straight from the recipe library, with the ramp and value
-// range the recipe suggests, so the formula lives in one place.
-function recipePanel(id: string, label: string, recipeId: string): ChannelPanel {
-  const recipe = BUILTIN_RECIPES.find(r => r.id === recipeId)
-  if (!recipe) throw new Error(`No built-in recipe "${recipeId}"`)
-  return {
-    id,
-    label,
-    mode: "gray",
-    expressions: [recipe.expr, "", ""],
-    stretch: "shared",
-    colormap: recipe.colormap,
-    domain: recipe.domain,
-  }
+// The indices are shown in their true −1…1 range on a diverging ramp instead
+// of a per-tile greyscale stretch: same quantity, but a colour that means the
+// same thing on every tile, which is the point of the whole exercise.
+const INDEX_DISPLAY: Pick<ChannelPanel, "stretch" | "domain"> = {
+  stretch: "shared",
+  domain: { kind: "fixed", min: -1, max: 1 },
 }
 
-// Built-ins — ids are stable (persisted as the active preset, used as React
-// keys). The two NBR views (standalone and inside "Compare all") show it in
-// its true −1…1 range on a diverging ramp instead of a per-tile greyscale
-// stretch: same quantity, but a colour that means the same thing on every
-// tile, which is the point of the whole exercise. The multi-panel grid
-// renders panels[0] for consumers (like the review page) that only care
-// about one composite.
-export const BUILTIN_PRESETS: ChannelPreset[] = [
+// Every built-in view, defined once. Each is its own band combination, and
+// "Compare all" shows them all side by side. Ids are stable (persisted as the
+// active preset, used as React keys).
+const BUILTIN_VIEWS: { id: string; panel: Omit<ChannelPanel, "id"> }[] = [
   {
     id: "true",
-    label: "True colour (R·G·B)",
-    builtin: true,
-    panels: [
-      {
-        id: "true-0",
-        label: "True colour (R·G·B)",
-        mode: "rgb",
-        expressions: ["R", "G", "B"],
-        ...TRUE_COLOUR_DISPLAY,
-      },
-    ],
+    panel: {
+      label: "True colour (R·G·B)",
+      mode: "rgb",
+      expressions: ["R", "G", "B"],
+      ...TRUE_COLOUR_DISPLAY,
+    },
   },
   {
     id: "veg",
-    label: "Colour infrared (nIR·R·G)",
-    builtin: true,
-    panels: [
-      {
-        id: "veg-0",
-        label: "Colour infrared (nIR·R·G)",
-        mode: "rgb",
-        expressions: ["nIR", "R", "G"],
-        ...FALSE_COLOUR_DISPLAY,
-      },
-    ],
+    panel: {
+      label: "Colour infrared (nIR·R·G)",
+      mode: "rgb",
+      expressions: ["nIR", "R", "G"],
+      ...FALSE_COLOUR_DISPLAY,
+    },
   },
   {
     id: "swir",
-    label: "SWIR (swIR2·nIR·G)",
-    builtin: true,
-    panels: [
-      {
-        id: "swir-0",
-        label: "SWIR (swIR2·nIR·G)",
-        mode: "rgb",
-        expressions: ["swIR2", "nIR", "G"],
-        ...FALSE_COLOUR_DISPLAY,
-      },
-    ],
+    panel: {
+      label: "SWIR (swIR2·nIR·G)",
+      mode: "rgb",
+      expressions: ["swIR2", "nIR", "G"],
+      ...FALSE_COLOUR_DISPLAY,
+    },
   },
   {
     id: "nbr",
-    label: "NBR (−1…1)",
-    builtin: true,
-    panels: [
-      {
-        id: "nbr-0",
-        label: "NBR, pinned to −1…1",
-        mode: "gray",
-        expressions: ["nd(nIR, swIR2)", "", ""],
-        stretch: "shared",
-        colormap: "RdYlGn",
-        domain: { kind: "fixed", min: -1, max: 1 },
-      },
-    ],
+    panel: {
+      label: "NBR (−1…1)",
+      mode: "gray",
+      expressions: ["nd(nIR, swIR2)", "", ""],
+      colormap: "RdYlGn",
+      ...INDEX_DISPLAY,
+    },
   },
   {
     id: "moisture",
-    label: "Canopy moisture (NDMI)",
-    builtin: true,
-    panels: [
-      {
-        id: "moisture-0",
-        label: "NDMI, pinned to −1…1",
-        mode: "gray",
-        expressions: ["nd(nIR, swIR1)", "", ""],
-        stretch: "shared",
-        colormap: "BrBG",
-        domain: { kind: "fixed", min: -1, max: 1 },
-      },
-    ],
+    panel: {
+      label: "Canopy moisture (NDMI)",
+      mode: "gray",
+      expressions: ["nd(nIR, swIR1)", "", ""],
+      colormap: "BrBG",
+      ...INDEX_DISPLAY,
+    },
   },
+  {
+    // Copes with opened canopy better than NDVI, which saturates.
+    id: "savi",
+    panel: {
+      label: "Greenness (SAVI)",
+      mode: "gray",
+      expressions: ["1.5 * (nIR - R) / (nIR + R + 0.5)", "", ""],
+      colormap: "RdYlGn",
+      ...INDEX_DISPLAY,
+    },
+  },
+  {
+    // Dry woody material, i.e. the fallen trees themselves.
+    id: "nbr2",
+    panel: {
+      label: "Dry wood (NBR2)",
+      mode: "gray",
+      expressions: ["nd(swIR1, swIR2)", "", ""],
+      colormap: "BrBG",
+      ...INDEX_DISPLAY,
+    },
+  },
+  {
+    // Overall reflectance, so bare ground and debris come out bright. It has
+    // no natural range, so it keeps a per-tile stretch.
+    id: "brightness",
+    panel: {
+      label: "Bare ground (TC brightness)",
+      mode: "gray",
+      expressions: [TC_BRIGHTNESS, "", ""],
+      colormap: "viridis",
+      stretch: "shared",
+      domain: { kind: "percentile", low: 2, high: 98 },
+    },
+  },
+]
+
+// The multi-panel grid renders panels[0] for consumers (like the review page)
+// that only care about one composite.
+export const BUILTIN_PRESETS: ChannelPreset[] = [
+  ...BUILTIN_VIEWS.map(({ id, panel }) => ({
+    id,
+    label: panel.label,
+    builtin: true,
+    panels: [{ ...panel, id: `${id}-0` }],
+  })),
   {
     id: "compare",
     label: "Compare all",
     builtin: true,
-    panels: [
-      {
-        id: "compare-0",
-        label: "True colour",
-        mode: "rgb",
-        expressions: ["R", "G", "B"],
-        ...TRUE_COLOUR_DISPLAY,
-      },
-      {
-        id: "compare-1",
-        label: "Colour infrared",
-        mode: "rgb",
-        expressions: ["nIR", "R", "G"],
-        ...FALSE_COLOUR_DISPLAY,
-      },
-      {
-        id: "compare-2",
-        label: "SWIR",
-        mode: "rgb",
-        expressions: ["swIR2", "nIR", "G"],
-        ...FALSE_COLOUR_DISPLAY,
-      },
-      {
-        id: "compare-3",
-        label: "NBR",
-        mode: "gray",
-        expressions: ["nd(nIR, swIR2)", "", ""],
-        stretch: "shared",
-        colormap: "RdYlGn",
-        domain: { kind: "fixed", min: -1, max: 1 },
-      },
-      recipePanel("compare-4", "Canopy moisture", "ndmi"),
-      // Greenness that copes with opened canopy better than NDVI.
-      recipePanel("compare-5", "SAVI", "savi"),
-      // Dry woody material, i.e. the fallen trees themselves.
-      recipePanel("compare-6", "NBR2", "nbr2"),
-      // Bare ground and debris come out bright.
-      recipePanel("compare-7", "TC brightness", "tc-brightness"),
-    ],
+    panels: BUILTIN_VIEWS.map(({ panel }, i) => ({ ...panel, id: `compare-${i}` })),
   },
 ]
 

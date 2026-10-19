@@ -207,10 +207,20 @@ export function HelpModal({ section, onClose, onOpenChannels }: HelpModalProps) 
                 ramp. Brown means dry, often a sign of damaged canopy.
               </li>
               <li>
-                <strong>Compare all</strong>: true colour, colour infrared, SWIR, NBR and canopy
-                moisture side by side, plus SAVI (greenness that copes with opened canopy), NBR2
-                (dry wood, such as fallen trees) and TC brightness (bare ground and debris show up
-                bright).
+                <strong>Greenness (SAVI)</strong>: like the familiar NDVI, but it still tells
+                thinned canopy from intact canopy where NDVI looks the same. Green is dense canopy.
+              </li>
+              <li>
+                <strong>Dry wood (NBR2)</strong>: picks up dry woody material such as fallen
+                trunks, on a brown → teal ramp. Brown means dry.
+              </li>
+              <li>
+                <strong>Bare ground (TC brightness)</strong>: overall brightness. Bare soil and
+                debris show up yellow; closed canopy stays dark. Scaled per tile, so compare
+                areas within a tile rather than across tiles.
+              </li>
+              <li>
+                <strong>Compare all</strong>: every combination above side by side.
               </li>
             </ul>
             <p>
