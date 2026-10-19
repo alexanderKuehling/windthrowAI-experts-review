@@ -5,15 +5,18 @@ import type { AuthUser } from "../utils/auth"
 type Mode = "login" | "register"
 
 interface LoginProps {
+  /** Why the reviewer is here, e.g. their session expired. Shown until they
+   * act, the same way a failed sign-in is. */
+  notice?: string | null
   onLogin: (user: AuthUser) => void
   onGuest: () => void
 }
 
-export function Login({ onLogin, onGuest }: LoginProps) {
+export function Login({ notice, onLogin, onGuest }: LoginProps) {
   const [mode, setMode] = useState<Mode>("login")
   const [name, setName] = useState("")
   const [password, setPassword] = useState("")
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(notice ?? null)
   const [busy, setBusy] = useState(false)
 
   const isRegister = mode === "register"

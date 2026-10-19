@@ -7,6 +7,7 @@ import {
   inputTifUrl,
   maskTifUrl,
 } from "../constants"
+import { SessionExpiredError } from "./auth"
 
 // tile_id → windthrow coverage in % (see COVERAGE_INDEX_URL).
 export type CoverageIndex = Record<string, number>
@@ -316,14 +317,9 @@ export async function encodeMaskPng(mask: Uint8Array, width: number, height: num
   )
 }
 
-// Thrown when the backend rejects the session token (e.g. expired). The UI
-// uses this to send the reviewer back to the login screen.
-export class SessionExpiredError extends Error {
-  constructor() {
-    super("Session expired — please sign in again.")
-    this.name = "SessionExpiredError"
-  }
-}
+// Lives in auth.ts (the presets sync throws it too); re-exported for callers
+// that already import it from here.
+export { SessionExpiredError }
 
 // Count how many pixels differ between the originally proposed mask and the
 // mask the reviewer submitted. This is the reviewer's "effort" signal that the

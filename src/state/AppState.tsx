@@ -7,6 +7,7 @@ import {
   saveCustomPresets,
 } from "../utils/channels"
 import type { ChannelPreset, PresetBundle } from "../utils/channels"
+import { SessionExpiredError } from "../utils/auth"
 import { loadCustomRecipes, saveCustomRecipes } from "../utils/recipes"
 import type { Recipe } from "../utils/recipes"
 import type { ReviewPatch } from "../utils/review"
@@ -18,9 +19,12 @@ interface AppStateProviderProps {
    * custom presets and saved formulas are persisted server-side (per reviewer)
    * instead of only in this browser's localStorage. */
   token?: string
+  /** Called when the backend rejects `token` — the stored session is dead, so
+   * syncing can't succeed until the reviewer signs in again. */
+  onSessionExpired?: () => void
 }
 
-export function AppStateProvider({ children, token }: AppStateProviderProps) {
+export function AppStateProvider({ children, token, onSessionExpired }: AppStateProviderProps) {
   const [patch, setPatch] = useState<ReviewPatch | null>(null)
   // Presets and saved formulas share one document server-side, so they're held
   // as one value here too: saving either has to send both, and splitting them
@@ -37,6 +41,13 @@ export function AppStateProvider({ children, token }: AppStateProviderProps) {
   // before it resolves — the fetch must never clobber a newer local edit.
   const dirtyRef = useRef(false)
 
+  // Held in a ref so a new callback identity (App re-renders) never re-runs
+  // the fetch below.
+  const onSessionExpiredRef = useRef(onSessionExpired)
+  useEffect(() => {
+    onSessionExpiredRef.current = onSessionExpired
+  })
+
   useEffect(() => {
     if (!token) return
     let cancelled = false
@@ -49,7 +60,9 @@ export function AppStateProvider({ children, token }: AppStateProviderProps) {
         saveCustomRecipes(remote.recipes)
       })
       .catch(e => {
-        if (!cancelled) setPresetsSyncError(e instanceof Error ? e.message : String(e))
+        if (cancelled) return
+        if (e instanceof SessionExpiredError) onSessionExpiredRef.current?.()
+        else setPresetsSyncError(e instanceof Error ? e.message : String(e))
       })
     return () => {
       cancelled = true
@@ -68,7 +81,10 @@ export function AppStateProvider({ children, token }: AppStateProviderProps) {
       if (!token) return
       pushPresetBundle(token, next)
         .then(() => setPresetsSyncError(null))
-        .catch(e => setPresetsSyncError(e instanceof Error ? e.message : String(e)))
+        .catch(e => {
+          if (e instanceof SessionExpiredError) onSessionExpiredRef.current?.()
+          else setPresetsSyncError(e instanceof Error ? e.message : String(e))
+        })
     }
 
     return {

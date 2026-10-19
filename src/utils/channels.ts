@@ -5,6 +5,7 @@ import type { ColormapId } from "./colormaps"
 import { parseRecipes } from "./recipes"
 import type { Recipe } from "./recipes"
 import { PRESETS_API_URL } from "../constants"
+import { SessionExpiredError } from "./auth"
 
 /** "rgb" = three expressions → red/green/blue. "gray" = one expression →
  * colour ramp. The wire value stays "gray" for compatibility with presets
@@ -713,6 +714,7 @@ export async function fetchPresetBundle(token: string): Promise<PresetBundle> {
   const res = await fetch(PRESETS_API_URL, {
     headers: { Authorization: `Bearer ${token}` },
   })
+  if (res.status === 401) throw new SessionExpiredError()
   if (!res.ok) throw new Error(`Could not load presets (${res.status}).`)
   const data: unknown = await res.json()
   const body = data && typeof data === "object" ? (data as Record<string, unknown>) : {}
@@ -725,5 +727,6 @@ export async function pushPresetBundle(token: string, bundle: PresetBundle): Pro
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
     body: JSON.stringify(bundle),
   })
+  if (res.status === 401) throw new SessionExpiredError()
   if (!res.ok) throw new Error(`Could not save presets (${res.status}).`)
 }

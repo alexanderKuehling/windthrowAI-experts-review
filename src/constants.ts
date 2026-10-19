@@ -40,6 +40,9 @@ export const REVIEW_SUMMARY_API_URL = `${TILE_API_URL}/reviews/summary`
 // the backend can attribute it to the reviewer (and reject spoofed names).
 export const AUTH_API_URL = `${TILE_API_URL}/auth/login`
 export const REGISTER_API_URL = `${TILE_API_URL}/auth/register`
+// Answers whether a token is still accepted — polled while the app is open
+// (see state/useSessionGuard.ts), not only at submit time.
+export const SESSION_API_URL = `${TILE_API_URL}/auth/me`
 
 // Leaderboard: aggregated review counts per reviewer, sorted server-side.
 export const RANKINGS_API_URL = `${TILE_API_URL}/rankings`

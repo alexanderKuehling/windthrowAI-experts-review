@@ -5,9 +5,10 @@ import { Login } from "./components/Login"
 import { Rankings } from "./components/Rankings"
 import { LegalModal } from "./components/Legal"
 import type { LegalPage } from "./components/Legal"
-import { guestUser, loadStoredUser, logout } from "./utils/auth"
+import { SESSION_EXPIRED_NOTICE, guestUser, loadStoredUser, logout } from "./utils/auth"
 import type { AuthUser } from "./utils/auth"
 import { AppStateProvider } from "./state/AppState"
+import { useSessionGuard } from "./state/useSessionGuard"
 import "./App.css"
 
 type View = "review" | "channels" | "rankings"
@@ -16,6 +17,9 @@ export default function App() {
   const [user, setUser] = useState<AuthUser | null>(loadStoredUser)
   const [view, setView] = useState<View>("review")
   const [legal, setLegal] = useState<LegalPage | null>(null)
+  // Shown on the login screen after the backend rejected the stored session,
+  // so being signed out doesn't look like a glitch.
+  const [loginNotice, setLoginNotice] = useState<string | null>(null)
 
   const isGuest = !!user?.guest
 
@@ -25,10 +29,31 @@ export default function App() {
     setView("review")
   }
 
+  function handleSessionExpired() {
+    handleLogout()
+    setLoginNotice(SESSION_EXPIRED_NOTICE)
+  }
+
+  function handleLogin(next: AuthUser) {
+    setLoginNotice(null)
+    setUser(next)
+  }
+
   function handleGuest() {
+    setLoginNotice(null)
     setUser(guestUser())
     setView("review")
   }
+
+  // Another tab signed in or out. A guest tab isn't tied to the stored
+  // session, so it carries on as it is.
+  function handleStoredUserChange(next: AuthUser | null) {
+    if (user?.guest || next?.token === user?.token) return
+    setUser(next)
+    setView("review")
+  }
+
+  useSessionGuard(user, handleSessionExpired, handleStoredUserChange)
 
   return (
     <div id="app-shell">
@@ -85,14 +110,17 @@ export default function App() {
 
       <main className="app-main">
         {!user ? (
-          <Login onLogin={setUser} onGuest={handleGuest} />
+          <Login notice={loginNotice} onLogin={handleLogin} onGuest={handleGuest} />
         ) : (
-          <AppStateProvider token={isGuest ? undefined : user.token}>
+          <AppStateProvider
+            token={isGuest ? undefined : user.token}
+            onSessionExpired={handleSessionExpired}
+          >
             {view === "review" ? (
               <ExpertReviewTab
                 reviewer={isGuest ? undefined : user.name}
                 token={isGuest ? undefined : user.token}
-                onSessionExpired={handleLogout}
+                onSessionExpired={handleSessionExpired}
                 onOpenChannels={() => setView("channels")}
               />
             ) : view === "channels" ? (
