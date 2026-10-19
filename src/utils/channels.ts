@@ -2,7 +2,7 @@ import { BandMathError, compileExpression, evaluateExpression } from "./bandmath
 import type { CompiledExpr } from "./bandmath"
 import { colormapAt, colormapLut, isColormapId, isDiverging } from "./colormaps"
 import type { ColormapId } from "./colormaps"
-import { parseRecipes } from "./recipes"
+import { BUILTIN_RECIPES, parseRecipes } from "./recipes"
 import type { Recipe } from "./recipes"
 import { PRESETS_API_URL } from "../constants"
 import { SessionExpiredError } from "./auth"
@@ -107,6 +107,22 @@ const TRUE_COLOUR_DISPLAY: Pick<ChannelPanel, "stretch" | "domain" | "gamma"> = 
   gamma: 1.4,
 }
 const FALSE_COLOUR_DISPLAY: Pick<ChannelPanel, "stretch"> = { stretch: "per-channel" }
+
+// An index panel straight from the recipe library, with the ramp and value
+// range the recipe suggests, so the formula lives in one place.
+function recipePanel(id: string, label: string, recipeId: string): ChannelPanel {
+  const recipe = BUILTIN_RECIPES.find(r => r.id === recipeId)
+  if (!recipe) throw new Error(`No built-in recipe "${recipeId}"`)
+  return {
+    id,
+    label,
+    mode: "gray",
+    expressions: [recipe.expr, "", ""],
+    stretch: "shared",
+    colormap: recipe.colormap,
+    domain: recipe.domain,
+  }
+}
 
 // Built-ins — ids are stable (persisted as the active preset, used as React
 // keys). The two NBR views (standalone and inside "Compare all") show it in
@@ -225,6 +241,13 @@ export const BUILTIN_PRESETS: ChannelPreset[] = [
         colormap: "RdYlGn",
         domain: { kind: "fixed", min: -1, max: 1 },
       },
+      recipePanel("compare-4", "Canopy moisture", "ndmi"),
+      // Greenness that copes with opened canopy better than NDVI.
+      recipePanel("compare-5", "SAVI", "savi"),
+      // Dry woody material, i.e. the fallen trees themselves.
+      recipePanel("compare-6", "NBR2", "nbr2"),
+      // Bare ground and debris come out bright.
+      recipePanel("compare-7", "TC brightness", "tc-brightness"),
     ],
   },
 ]

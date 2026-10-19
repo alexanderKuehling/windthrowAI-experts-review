@@ -207,8 +207,10 @@ export function HelpModal({ section, onClose, onOpenChannels }: HelpModalProps) 
                 ramp. Brown means dry, often a sign of damaged canopy.
               </li>
               <li>
-                <strong>Compare all</strong>: true colour, colour infrared, SWIR and NBR side by
-                side.
+                <strong>Compare all</strong>: true colour, colour infrared, SWIR, NBR and canopy
+                moisture side by side, plus SAVI (greenness that copes with opened canopy), NBR2
+                (dry wood, such as fallen trees) and TC brightness (bare ground and debris show up
+                bright).
               </li>
             </ul>
             <p>
