@@ -659,59 +659,33 @@
   flex-wrap: wrap;
 }
 
-/* The tile and its tools, one card. The canvas area asks for the width its
-   plots need (flex-basis, set from the size slider); the side column (mask
-   tools, then the probe readout) sits beside it while there's room and wraps
-   below once the plots are wider. */
+/* The canvas area asks for the width its plots need (flex-basis, set from the
+   size slider) and narrows to keep the opacity slider beside it. */
 .review-stage {
   display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  gap: 16px 24px;
-  justify-content: center;
-  padding: 14px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-}
-
-.review-side {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  flex: 1 1 280px;
-  max-width: 520px;
-}
-
-/* On a wide screen the side column stays beside the plots however many there
-   are (the grid narrows instead) and sticks under the 53 px header, so the
-   mask tools stay in reach while scrolling through a tall grid. */
-@media (min-width: 860px) {
-  .review-stage { flex-wrap: nowrap; }
-  .review-side {
-    flex: 1 0 320px;
-    position: sticky;
-    top: 68px;
-  }
-}
-
-.review-tools {
-  display: flex;
-  flex-direction: column;
   align-items: flex-start;
   gap: 12px;
+  justify-content: center;
 }
-.review-tools .review-notice { align-self: stretch; }
 
-/* Label + slider on one row; the fixed label width keeps the sliders lined up. */
-.review-slider {
+/* Slim vertical mask-opacity slider beside the plots. It sticks under the
+   53 px header, so it stays in reach while scrolling through a tall grid. */
+.review-opacity {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 10px;
-  width: 100%;
+  gap: 6px;
+  flex: none;
+  position: sticky;
+  top: 68px;
 }
-.review-slider .review-toolbar-label { flex: 0 0 120px; }
-.review-slider input[type="range"] { flex: 1; min-width: 0; }
+.review-opacity input[type="range"] {
+  writing-mode: vertical-lr;
+  direction: rtl; /* 100% at the top */
+  width: 20px;
+  height: 160px;
+  margin: 0;
+}
 
 .review-canvas-area {
   position: relative;
@@ -808,6 +782,29 @@
 }
 
 .review-zone-head h3 { font-size: 14px; }
+
+/* Small confirm dialog. margin: auto centres it again after the global reset. */
+.confirm-dialog {
+  margin: auto;
+  width: min(400px, calc(100vw - 32px));
+  padding: 18px 20px;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.confirm-dialog::backdrop { background: rgba(15, 23, 42, 0.55); }
+.confirm-dialog h3 { font-size: 15px; margin-bottom: 8px; }
+.confirm-dialog p { font-size: 13px; margin-bottom: 16px; }
+.confirm-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.confirm-dialog-danger,
+.confirm-dialog-danger:hover { background: var(--red); color: #fff; }
+.confirm-dialog-danger:hover { filter: brightness(1.08); }
 
 /* Add/Remove segmented control */
 .review-segmented {
@@ -1364,7 +1361,7 @@
   margin-right: 2px;
 }
 
-/* Probe under the mask tools, beside the review canvas. */
+/* Band values under the cursor, below the mask tools. */
 .review-readout {
   display: flex;
   flex-direction: column;
