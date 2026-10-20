@@ -36,8 +36,12 @@ const DEFAULT_OVERLAY_ALPHA = 0.3
 const MIN_VISIBLE_ALPHA = 0.1
 // Brush radius in mask pixels; the toolbar shows the diameter, 2r + 1 = 5 px.
 const DEFAULT_BRUSH_RADIUS = 2
-// %, 0 = show every positive tile (no filter). 1% of a tile is 59 ha.
-const DEFAULT_MIN_COVERAGE = 2
+// A tile is 256 × 256 Landsat pixels of 0.09 ha, so 1% of a tile is 655 px (59 ha).
+const TILE_PX = 256 * 256
+// %, 0 = show every positive tile (no filter). Starts at 30 px (2.7 ha), the
+// patch size amazon-scan's export rule requires, so on a round written with
+// the rule it hides nothing; on older rounds it hides only near-empty masks.
+const DEFAULT_MIN_COVERAGE = (30 / TILE_PX) * 100
 const MAX_MIN_COVERAGE = 20    // slider ceiling (only a handful of tiles exceed this)
 const HELP_SEEN_KEY = "windthrowai.helpSeen.v1"
 // Inside tier 1, half the time narrow the pick to the tiles the classifier was
@@ -75,6 +79,14 @@ function loadPanelSizes(): Record<number, number> {
   } catch {
     return {} // storage blocked or garbled — defaults
   }
+}
+
+// "30 px (0.05%)": the filter's low end is easier to judge in pixels, which a
+// % rounded to one decimal would show as 0.0.
+function formatMinCoverage(pct: number): string {
+  if (pct <= 0) return "0 px"
+  const px = Math.round((pct / 100) * TILE_PX)
+  return `${px} px (${pct < 1 ? pct.toFixed(2) : pct.toFixed(1)}%)`
 }
 
 function pickTierLabel(tier: PickTier | null, isControl: boolean): string | null {
@@ -307,7 +319,7 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
     const min = minCoverageRef.current
     const pool = eligibleTiles(list, min, coverageIndexRef.current)
     if (pool.length === 0) {
-      setNotice(`No tile has ≥ ${min}% windthrow coverage — lower the filter.`)
+      setNotice(`No tile has ≥ ${formatMinCoverage(min)} windthrow — lower the filter.`)
       setStatus("ready") // keep the current tile on screen, but don't leave the UI stuck
       return
     }
@@ -1299,13 +1311,13 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
       {/* Tile filter */}
       <div className="review-filter-row">
         <span className="review-toolbar-label">
-          Show tiles with at least {minCoverage === 0 ? "0" : minCoverage.toFixed(1)}% windthrow
+          Show tiles with at least {formatMinCoverage(minCoverage)} windthrow
         </span>
         <input
           type="range"
           min={0}
           max={MAX_MIN_COVERAGE}
-          step={0.1}
+          step={0.01}
           value={minCoverage}
           aria-label="Minimum windthrow coverage filter"
           onChange={e => setMinCoverage(Number(e.target.value))}

@@ -442,11 +442,12 @@ export function HelpModal({ section, onClose, onOpenChannels }: HelpModalProps) 
           </section>
 
           <section ref={registerSection} data-section="filter">
-            <h3>Show tiles with at least X % windthrow</h3>
+            <h3>Show tiles with at least X px windthrow</h3>
             <p>
               This is a session setting, not a per-tile action: it controls which tiles are drawn
-              at random. Raising it hides tiles where the model found only a tiny sliver of
-              windthrow. If the tile on screen changes by itself, this is why.
+              at random. It starts at 30 px (2.7 ha), the smallest patch the scan publishes, so
+              at first it hides almost nothing. Raising it hides tiles where the model found only
+              a tiny sliver of windthrow. If the tile on screen changes by itself, this is why.
             </p>
           </section>
 
