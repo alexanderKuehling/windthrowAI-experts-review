@@ -1,8 +1,12 @@
 // Precompute the windthrow coverage (% of pixels that are windthrow in the
-// proposed mask) for every positive tile, so the review UI can filter by
+// proposed mask) for every flagged tile, so the review UI can filter by
 // coverage *before* fetching any imagery.
 //
-// Run: node scripts/build-coverage-index.mjs
+// Only a fallback: the app takes coverage from the `coverage` column of
+// inputs_index.csv whenever the index has one (every export since the
+// row-folder layout does) and loads this file only for an index without it.
+//
+// Run: npm run build:coverage
 // Output: public/coverage_index.json  { "<tile_id>": <coveragePercent>, ... }
 //
 // Re-run whenever the dataset's masks/ or inputs_index.csv change.
@@ -14,25 +18,36 @@ import { fileURLToPath } from "node:url"
 const HF_BASE =
   "https://huggingface.co/datasets/alexKlg/windthrowAI-dataset-segmentation_results/resolve/main"
 const INDEX_URL = `${HF_BASE}/inputs_index.csv`
-const maskUrl = id => `${HF_BASE}/masks/${id}.tif`
+// Same fallback as maskTifUrl in src/constants.ts: a round names each mask in
+// the `mask_file` column (one subfolder per grid row, masks/r0341/<id>.tif);
+// rounds from before that column keep masks/ flat.
+const maskUrl = tile => `${HF_BASE}/${tile.maskFile ?? `masks/${tile.id}.tif`}`
 
 const CONCURRENCY = 24
 const OUT = resolve(dirname(fileURLToPath(import.meta.url)), "../public/coverage_index.json")
 
-async function fetchTileIds() {
+async function fetchTiles() {
   const res = await fetch(INDEX_URL)
   if (!res.ok) throw new Error(`inputs_index.csv: ${res.status}`)
   const lines = (await res.text()).trim().split(/\r?\n/)
-  const idCol = lines[0].split(",").indexOf("tile_id")
+  const header = lines[0].split(",")
+  const idCol = header.indexOf("tile_id")
   if (idCol === -1) throw new Error("inputs_index.csv missing tile_id column")
-  return lines.slice(1).map(l => l.split(",")[idCol]).filter(Boolean)
+  const maskCol = header.indexOf("mask_file")
+  const kindCol = header.indexOf("kind")
+  return lines
+    .slice(1)
+    .map(l => l.split(","))
+    // Spot checks stay out, as in fetchTileIndex: their coverage is 0 by construction.
+    .filter(cols => cols[idCol] && cols[kindCol] !== "control")
+    .map(cols => ({ id: cols[idCol], maskFile: cols[maskCol] || undefined }))
 }
 
 // Coverage = fraction of nonzero mask pixels, as a percentage. Mirrors the
 // browser's rule in loadPatch (mask value > 0 counts as windthrow).
-async function coverageOf(id) {
-  const res = await fetch(maskUrl(id))
-  if (!res.ok) throw new Error(`mask ${id}: ${res.status}`)
+async function coverageOf(tile) {
+  const res = await fetch(maskUrl(tile))
+  if (!res.ok) throw new Error(`mask ${tile.id}: ${res.status}`)
   const tiff = await fromArrayBuffer(await res.arrayBuffer())
   const image = await tiff.getImage()
   const [band] = await image.readRasters()
@@ -42,24 +57,24 @@ async function coverageOf(id) {
 }
 
 async function main() {
-  const ids = await fetchTileIds()
-  console.log(`Computing coverage for ${ids.length} tiles…`)
+  const tiles = await fetchTiles()
+  console.log(`Computing coverage for ${tiles.length} tiles…`)
   const index = {}
   let done = 0
   let failed = 0
 
-  // Fixed-size worker pool over the id list.
+  // Fixed-size worker pool over the tile list.
   let cursor = 0
   async function worker() {
-    while (cursor < ids.length) {
-      const id = ids[cursor++]
+    while (cursor < tiles.length) {
+      const tile = tiles[cursor++]
       try {
-        index[id] = Math.round((await coverageOf(id)) * 100) / 100 // 2 decimals
+        index[tile.id] = Math.round((await coverageOf(tile)) * 100) / 100 // 2 decimals
       } catch (e) {
         failed++
-        console.warn(`  ! ${id}: ${e.message}`)
+        console.warn(`  ! ${tile.id}: ${e.message}`)
       }
-      if (++done % 50 === 0) console.log(`  ${done}/${ids.length}`)
+      if (++done % 50 === 0) console.log(`  ${done}/${tiles.length}`)
     }
   }
   await Promise.all(Array.from({ length: CONCURRENCY }, worker))
