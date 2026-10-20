@@ -5,8 +5,8 @@ export const PASSWORD_MIN = 8
 
 // A signed-in reviewer. `token` is the session credential the backend hands out
 // on login; it is replayed on every review submission (see submitReview).
-// A guest has no token: they can review anonymously but are not attributed and
-// never appear in the ranking.
+// A guest has no token: they can look around (browse tiles, try the tools, build
+// presets) but can't submit — the deployed backend rejects anonymous reviews.
 export interface AuthUser {
   name: string
   token: string

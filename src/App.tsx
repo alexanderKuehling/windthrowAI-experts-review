@@ -24,7 +24,9 @@ export default function App() {
   const isGuest = !!user?.guest
 
   function handleLogout() {
-    logout()
+    // A guest has no stored session; clearing storage would sign out a
+    // reviewer in another tab.
+    if (!user?.guest) logout()
     setUser(null)
     setView("review")
   }
@@ -100,7 +102,7 @@ export default function App() {
                 {isGuest && <span className="header-guest-badge">Guest mode</span>}
                 <span className="header-username" title={user.name}>{user.name}</span>
                 <button className="tab-btn" onClick={handleLogout}>
-                  {isGuest ? "Exit" : "Sign out"}
+                  {isGuest ? "Sign in" : "Sign out"}
                 </button>
               </div>
             </>
@@ -122,6 +124,7 @@ export default function App() {
                 token={isGuest ? undefined : user.token}
                 onSessionExpired={handleSessionExpired}
                 onOpenChannels={() => setView("channels")}
+                onSignIn={handleLogout}
               />
             ) : view === "channels" ? (
               <ChannelsTab />

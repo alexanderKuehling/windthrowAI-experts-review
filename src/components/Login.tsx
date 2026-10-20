@@ -117,7 +117,7 @@ export function Login({ notice, onLogin, onGuest }: LoginProps) {
           Continue without signing in
         </button>
         <p className="login-guest-hint">
-          Review without an account — doesn't count towards the rankings.
+          Look around without an account. Submitting reviews needs one.
         </p>
       </form>
     </div>

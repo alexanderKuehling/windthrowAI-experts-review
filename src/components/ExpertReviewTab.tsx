@@ -101,13 +101,14 @@ function pickTierLabel(tier: PickTier | null, isControl: boolean): string | null
 }
 
 interface ExpertReviewTabProps {
-  reviewer?: string // omitted for anonymous guest reviews
-  token?: string    // omitted for anonymous guest reviews
+  reviewer?: string // omitted for guests
+  token?: string    // omitted for guests, who can look around but not submit
   onSessionExpired: () => void
   onOpenChannels: () => void
+  onSignIn: () => void // a guest leaves for the login screen
 }
 
-export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChannels }: ExpertReviewTabProps) {
+export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChannels, onSignIn }: ExpertReviewTabProps) {
   const { setPatch: setSharedPatch, customPresets } = useAppState()
 
   const [tiles, setTiles] = useState<string[] | null>(null)
@@ -793,7 +794,7 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
 
   // ── Submitting ────────────────────────────────────────────────────────────
   async function send(verdict: Verdict, mask: Uint8Array) {
-    if (!patch || !tiles) return
+    if (!patch || !tiles || !canSubmit) return
     setStatus("submitting")
     setError(null)
     const changed = changedVsProposed(mask)
@@ -844,6 +845,9 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
   }
 
   const busy = status !== "ready"
+  // The deployed backend rejects a review without a session token (401), and
+  // for a guest that 401 would read as an expired session. Guests keep Skip.
+  const canSubmit = !!token
 
   const meta = patch ? tileMeta[patch.tileId] : undefined
   const isControl = meta?.kind === "control"
@@ -950,13 +954,22 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
           </button>
         </div>
 
+        {!canSubmit && (
+          <div className="review-notice review-notice-row" role="note">
+            <span>Guest mode: you can look around, but only signed-in reviewers can submit.</span>
+            <button className="tab-btn" onClick={onSignIn}>
+              Sign in
+            </button>
+          </div>
+        )}
+
         <div className="review-decision">
           {isControl ? (
             <div className="review-decision-item">
               <button
                 className="review-decision-btn review-decision-accept"
                 onClick={handleSubmit}
-                disabled={busy}
+                disabled={busy || !canSubmit}
               >
                 {status === "submitting"
                   ? "…"
@@ -974,7 +987,7 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
                 <button
                   className="review-decision-btn review-decision-accept"
                   onClick={handleSubmit}
-                  disabled={busy}
+                  disabled={busy || !canSubmit}
                 >
                   {status === "submitting" ? "…" : dirty ? "💾 Save my corrections" : "✔️ Confirm mask"}
                 </button>
@@ -984,7 +997,7 @@ export function ExpertReviewTab({ reviewer, token, onSessionExpired, onOpenChann
                 <button
                   className="review-decision-btn review-decision-reject"
                   onClick={handleNoWindthrow}
-                  disabled={busy}
+                  disabled={busy || !canSubmit}
                 >
                   ❌ No windthrow here
                 </button>
