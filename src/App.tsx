@@ -124,7 +124,6 @@ export default function App() {
                 token={isGuest ? undefined : user.token}
                 onSessionExpired={handleSessionExpired}
                 onOpenChannels={() => setView("channels")}
-                onSignIn={handleLogout}
               />
             ) : view === "channels" ? (
               <ChannelsTab />

@@ -34,9 +34,9 @@ reviews can reveal what the model misses, and they feed the retraining gate's
 check against a classifier drifting into flagging plain forest.
 
 Signed-in reviewers also see the **Rankings** tab. "Continue without signing
-in" lets people look around: browse tiles, paint, skip, build presets. The
-decision buttons stay disabled for guests, because the deployed backend
-rejects reviews without a session token.
+in" lets people review without an account: the backend stores a guest's
+reviews without a name, so they count for retraining but never reach the
+rankings. Guest presets stay in the browser.
 
 This app was split out of the main WindthrowAI segmentation frontend so the
 review workflow can be shared independently.

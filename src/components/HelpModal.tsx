@@ -374,8 +374,7 @@ export function HelpModal({ section, onClose, onOpenChannels }: HelpModalProps) 
             <p>
               Once the red mask on screen matches what you actually see in the imagery — using
               "Add pixels" / "Remove pixels" if needed — pick exactly one of the three buttons.
-              Each one submits your review and immediately loads the next tile. In guest mode only
-              Skip works: sign in to submit.
+              Each one submits your review and immediately loads the next tile.
             </p>
             <ul className="help-decision-legend">
               <li>

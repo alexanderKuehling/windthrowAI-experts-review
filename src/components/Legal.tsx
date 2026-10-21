@@ -256,7 +256,9 @@ function Privacy() {
       <p>
         <strong>a. Type of data</strong>
         <br />
-        To use the review features (rating and correcting model output), a user account is required.
+        A user account is needed to appear on the leaderboard and to keep your channel presets across
+        devices. The review features (rating and correcting model output) can also be used without an
+        account, in guest mode (see Section D).
         Registration and sign-in are handled by the Tool's own authentication system; no external
         identity provider is used. The following data are processed:
       </p>
@@ -320,7 +322,8 @@ function Privacy() {
         <br />
         When you use the Tool, your ratings (accept/reject decisions on model detections) and your
         corrections of segmentation masks, together with timestamps, are stored and linked to your
-        user account.
+        user account. In guest mode they are stored without a username and are not linked to any
+        account, and they do not appear on the leaderboard.
       </p>
       <p>
         <strong>b. Purpose</strong>
@@ -349,7 +352,8 @@ function Privacy() {
         <strong>e. Data deletion</strong>
         <br />
         Upon deletion of your account, your contributions are decoupled from your account and
-        retained in anonymized form for research purposes.
+        retained in anonymized form for research purposes. Contributions made in guest mode cannot be
+        attributed to you afterwards, so they cannot be deleted individually on request.
       </p>
 
       <h3>E. Satellite map tiles (Google Cloud Run / Google Earth Engine)</h3>

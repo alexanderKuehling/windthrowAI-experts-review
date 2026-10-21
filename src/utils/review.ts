@@ -367,6 +367,9 @@ export async function submitReview(sub: ReviewSubmission): Promise<void> {
 
   const headers = sub.token ? { Authorization: `Bearer ${sub.token}` } : undefined
   const res = await fetch(REVIEW_API_URL, { method: "POST", headers, body: form })
+  // A guest has no session to expire: their 401 means the backend has guest
+  // reviews switched off (AUTH_REQUIRED=1), so don't sign them out over it.
+  if (res.status === 401 && !sub.token) throw new Error("Guest reviews are switched off right now. Sign in to submit.")
   if (res.status === 401) throw new SessionExpiredError()
   if (!res.ok) {
     const detail = await res.text().catch(() => "")
